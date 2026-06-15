@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shxntanu/epsilon/core/events"
+	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
 )
 
@@ -21,17 +22,19 @@ type Run struct {
 	id       string
 	bus      *events.Bus
 	provider Provider
+	tools    *tools.Registry
 	mu       sync.Mutex
 	closed   bool
 	messages []types.Message
 }
 
 // harness will create a run for the users
-func newRun(id string, eventBufferSize int, provider Provider) *Run {
+func newRun(id string, eventBufferSize int, provider Provider, toolRegistry *tools.Registry) *Run {
 	return &Run{
 		id:       id,
 		bus:      events.NewBus(id, eventBufferSize),
 		provider: provider,
+		tools:    toolRegistry,
 	}
 }
 
@@ -114,7 +117,13 @@ func (r *Run) Step(ctx context.Context) error {
 	messages := make([]types.Message, len(r.messages))
 	copy(messages, r.messages)
 	provider := r.provider
+	toolRegistry := r.tools
 	r.mu.Unlock()
+
+	var toolDefs []types.ToolDefinition
+	if toolRegistry != nil {
+		toolDefs = toolRegistry.Definitions()
+	}
 
 	_, err := r.bus.Publish(ctx, types.Event{
 		Kind:      types.EventModelStarted,
@@ -126,6 +135,7 @@ func (r *Run) Step(ctx context.Context) error {
 
 	resp, err := provider.Respond(ctx, types.ModelRequest{
 		Messages: messages,
+		Tools:    toolDefs,
 	})
 	if err != nil {
 		_, _ = r.bus.Publish(ctx, types.NewRunErrorEvent(time.Now().UTC(), err))

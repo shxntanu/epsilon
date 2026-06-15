@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
 )
 
@@ -17,6 +18,7 @@ type Harness struct {
 	eventBufferSize int
 	newRunID        func() (string, error)
 	provider        Provider
+	toolRegistry    *tools.Registry
 }
 
 const defaultEventBufferSize = 64
@@ -26,10 +28,13 @@ func New(opts ...Option) (*Harness, error) {
 		runs:            make(map[string]*Run),
 		eventBufferSize: defaultEventBufferSize,
 		newRunID:        randomRunID,
+		toolRegistry:    tools.NewRegistry(),
 	}
 
 	for _, opt := range opts {
-		opt(h)
+		if err := opt(h); err != nil {
+			return nil, fmt.Errorf("apply option: %w", err)
+		}
 	}
 
 	if h.eventBufferSize <= 0 {
@@ -48,7 +53,7 @@ func (h *Harness) Start(ctx context.Context) (*Run, error) {
 		return nil, fmt.Errorf("create run ID: %w", err)
 	}
 
-	run := newRun(id, h.eventBufferSize, h.provider)
+	run := newRun(id, h.eventBufferSize, h.provider, h.toolRegistry)
 
 	h.mu.Lock()
 	h.runs[id] = run
