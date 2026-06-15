@@ -42,12 +42,57 @@ func newRun(id string, eventBufferSize int, provider Provider, toolRegistry *too
 	}
 }
 
+func newRunFromHistory(id string, eventBufferSize int, provider Provider, toolRegistry *tools.Registry,
+	broker permissions.Broker, eventStore events.Store, history []types.Event) *Run {
+	return &Run{
+		id:       id,
+		bus:      events.NewBusFromHistory(id, eventBufferSize, eventStore, history),
+		provider: provider,
+		tools:    toolRegistry,
+		broker:   broker,
+		closed:   eventHistoryClosed(history),
+		messages: messagesFromEvents(history),
+	}
+}
+
 func (r *Run) ID() string {
 	return r.id
 }
 
 func (r *Run) Subscribe() (*events.Subscription, error) {
 	return r.bus.Subscribe()
+}
+
+func messagesFromEvents(history []types.Event) []types.Message {
+	messages := make([]types.Message, 0)
+	for _, event := range history {
+		switch event.Kind {
+		case types.EventUserMessageAdded, types.EventModelMessageCompleted:
+			if event.Message != nil {
+				messages = append(messages, *event.Message)
+			}
+		case types.EventToolCallCompleted:
+			if event.ToolCall != nil && event.ToolResult != nil {
+				messages = append(messages, types.ToolMessage(
+					event.ToolCall.ID,
+					event.ToolCall.Name,
+					*event.ToolResult,
+				))
+			}
+		}
+	}
+
+	return messages
+}
+
+func eventHistoryClosed(history []types.Event) bool {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Kind == types.EventRunCompleted {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Send is used to send messages to the bus.

@@ -53,6 +53,21 @@ func NewBusWithStore(runID string, bufferSize int, store Store) *Bus {
 	}
 }
 
+// NewBusFromHistory returns an event bus seeded with previously persisted events.
+func NewBusFromHistory(runID string, bufferSize int, store Store, history []types.Event) *Bus {
+	bus := NewBusWithStore(runID, bufferSize, store)
+	bus.history = make([]types.Event, len(history))
+	copy(bus.history, history)
+
+	for _, event := range history {
+		if event.Sequence > bus.nextSeq {
+			bus.nextSeq = event.Sequence
+		}
+	}
+
+	return bus
+}
+
 // Subscribe registers a new event subscriber.
 func (b *Bus) Subscribe() (*Subscription, error) {
 	b.mu.Lock()

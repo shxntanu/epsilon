@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -26,6 +27,8 @@ type Harness struct {
 }
 
 const defaultEventBufferSize = 64
+
+var ErrEventStoreMissing = errors.New("event store missing")
 
 func New(opts ...Option) (*Harness, error) {
 	h := &Harness{
@@ -68,6 +71,40 @@ func (h *Harness) Start(ctx context.Context) (*Run, error) {
 	if err != nil {
 		return nil, fmt.Errorf("publish run started event: %w", err)
 	}
+
+	return run, nil
+}
+
+func (h *Harness) Resume(ctx context.Context, runID string) (*Run, error) {
+	h.mu.Lock()
+	if run, ok := h.runs[runID]; ok {
+		h.mu.Unlock()
+		return run, nil
+	}
+	h.mu.Unlock()
+
+	if h.eventStore == nil {
+		return nil, ErrEventStoreMissing
+	}
+
+	history, err := h.eventStore.Load(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("load run events: %w", err)
+	}
+	if len(history) == 0 {
+		return nil, fmt.Errorf("run %q has no persisted events", runID)
+	}
+
+	run := newRunFromHistory(runID, h.eventBufferSize, h.provider, h.toolRegistry,
+		h.permissionBroker, h.eventStore, history)
+
+	h.mu.Lock()
+	if existing, ok := h.runs[runID]; ok {
+		h.mu.Unlock()
+		return existing, nil
+	}
+	h.runs[runID] = run
+	h.mu.Unlock()
 
 	return run, nil
 }
