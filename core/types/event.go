@@ -59,6 +59,34 @@ func NewModelTextDeltaEvent(now time.Time, delta string) Event {
 	}
 }
 
+// NewToolCallRequestedEvent returns an event for a tool call requested by the model.
+func NewToolCallRequestedEvent(now time.Time, call ToolCall) Event {
+	return Event{
+		Kind:      EventToolCallRequested,
+		CreatedAt: now,
+		ToolCall:  &call,
+	}
+}
+
+// NewToolCallStartedEvent returns an event for a tool call beginning execution.
+func NewToolCallStartedEvent(now time.Time, call ToolCall) Event {
+	return Event{
+		Kind:      EventToolCallStarted,
+		CreatedAt: now,
+		ToolCall:  &call,
+	}
+}
+
+// NewToolCallCompletedEvent returns an event for a completed tool call.
+func NewToolCallCompletedEvent(now time.Time, call ToolCall, result ToolResult) Event {
+	return Event{
+		Kind:       EventToolCallCompleted,
+		CreatedAt:  now,
+		ToolCall:   &call,
+		ToolResult: &result,
+	}
+}
+
 // NewRunErrorEvent returns an event for a run-level error.
 func NewRunErrorEvent(now time.Time, err error) Event {
 	return Event{

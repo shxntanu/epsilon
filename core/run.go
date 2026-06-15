@@ -155,5 +155,81 @@ func (r *Run) Step(ctx context.Context) error {
 		return fmt.Errorf("publish model completed event: %w", err)
 	}
 
+	if len(resp.Message.ToolCalls) > 0 {
+		if err := r.executeToolCalls(ctx, resp.Message.ToolCalls, toolRegistry); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+func (r *Run) executeToolCalls(ctx context.Context, calls []types.ToolCall, registry *tools.Registry) error {
+	for _, call := range calls {
+		if _, err := r.bus.Publish(ctx, types.NewToolCallRequestedEvent(time.Now().UTC(), call)); err != nil {
+			return fmt.Errorf("publish tool call requested event: %w", err)
+		}
+
+		result, err := r.executeToolCall(ctx, call, registry)
+		if err != nil {
+			return err
+		}
+
+		r.mu.Lock()
+		if r.closed {
+			r.mu.Unlock()
+			return ErrRunClosed
+		}
+		r.messages = append(r.messages, types.ToolMessage(call.ID, call.Name, result))
+		r.mu.Unlock()
+	}
+
+	return nil
+}
+
+func (r *Run) executeToolCall(ctx context.Context, call types.ToolCall,
+	registry *tools.Registry) (types.ToolResult, error) {
+	if registry == nil {
+		result := types.ErrorToolResult("tool registry is not configured")
+		if _, err := r.bus.Publish(ctx, types.NewToolCallCompletedEvent(
+			time.Now().UTC(), call, result)); err != nil {
+			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
+		}
+		return result, nil
+	}
+
+	tool, ok := registry.Get(call.Name)
+	if !ok {
+		result := types.ErrorToolResult(fmt.Sprintf("tool %q not found", call.Name))
+		if _, err := r.bus.Publish(ctx, types.NewToolCallCompletedEvent(
+			time.Now().UTC(), call, result)); err != nil {
+			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
+		}
+		return result, nil
+	}
+
+	if _, err := r.bus.Publish(ctx, types.NewToolCallStartedEvent(
+		time.Now().UTC(), call)); err != nil {
+		return types.ToolResult{}, fmt.Errorf("publish tool call started event: %w", err)
+	}
+
+	result, err := tool.Run(ctx, call.Input)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			_, _ = r.bus.Publish(ctx, types.NewRunErrorEvent(time.Now().UTC(), err))
+			return types.ToolResult{}, fmt.Errorf("run tool %q: %w", call.Name, err)
+		}
+		errorResult := types.ErrorToolResult(err.Error())
+		result = &errorResult
+	}
+	if result == nil {
+		result = &types.ToolResult{}
+	}
+
+	if _, err := r.bus.Publish(ctx, types.NewToolCallCompletedEvent(
+		time.Now().UTC(), call, *result)); err != nil {
+		return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
+	}
+
+	return *result, nil
 }
