@@ -28,6 +28,9 @@ type Bus struct {
 	nextSubID   uint64
 	closed      bool
 	subscribers map[uint64]chan types.Event
+
+	// history for replaying events
+	history []types.Event
 }
 
 // NewBus returns an event bus for one run.
@@ -54,7 +57,10 @@ func (b *Bus) Subscribe() (*Subscription, error) {
 
 	b.nextSubID++
 	id := b.nextSubID
-	ch := make(chan types.Event, b.bufferSize)
+	ch := make(chan types.Event, len(b.history)+b.bufferSize)
+	for _, event := range b.history {
+		ch <- event
+	}
 	b.subscribers[id] = ch
 
 	return &Subscription{
@@ -86,6 +92,9 @@ func (b *Bus) Publish(ctx context.Context, event types.Event) (types.Event, erro
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
+
+	// save the event to the array
+	b.history = append(b.history, event)
 
 	for _, subscriber := range b.subscribers {
 		select {
