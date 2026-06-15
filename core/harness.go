@@ -16,6 +16,7 @@ type Harness struct {
 	runs            map[string]*Run
 	eventBufferSize int
 	newRunID        func() (string, error)
+	provider        Provider
 }
 
 const defaultEventBufferSize = 64
@@ -47,7 +48,7 @@ func (h *Harness) Start(ctx context.Context) (*Run, error) {
 		return nil, fmt.Errorf("create run ID: %w", err)
 	}
 
-	run := newRun(id, h.eventBufferSize)
+	run := newRun(id, h.eventBufferSize, h.provider)
 
 	h.mu.Lock()
 	h.runs[id] = run

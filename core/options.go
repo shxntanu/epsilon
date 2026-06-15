@@ -13,3 +13,9 @@ func WithRunIDGenerator(fn func() (string, error)) Option {
 		h.newRunID = fn
 	}
 }
+
+func WithProvider(provider Provider) Option {
+	return func(h *Harness) {
+		h.provider = provider
+	}
+}

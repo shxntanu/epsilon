@@ -14,21 +14,24 @@ import (
 var (
 	ErrRunClosed          = errors.New("run closed")
 	ErrInvalidMessageRole = errors.New("invalid message role")
+	ErrProviderMissing    = errors.New("provider missing")
 )
 
 type Run struct {
 	id       string
 	bus      *events.Bus
+	provider Provider
 	mu       sync.Mutex
 	closed   bool
 	messages []types.Message
 }
 
 // harness will create a run for the users
-func newRun(id string, eventBufferSize int) *Run {
+func newRun(id string, eventBufferSize int, provider Provider) *Run {
 	return &Run{
-		id:  id,
-		bus: events.NewBus(id, eventBufferSize),
+		id:       id,
+		bus:      events.NewBus(id, eventBufferSize),
+		provider: provider,
 	}
 }
 
@@ -92,6 +95,54 @@ func (r *Run) Close(ctx context.Context) error {
 	})
 	if err != nil {
 		return fmt.Errorf("publish run completed event: %w", err)
+	}
+
+	return nil
+}
+
+func (r *Run) Step(ctx context.Context) error {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return ErrRunClosed
+	}
+	if r.provider == nil {
+		r.mu.Unlock()
+		return ErrProviderMissing
+	}
+
+	messages := make([]types.Message, len(r.messages))
+	copy(messages, r.messages)
+	provider := r.provider
+	r.mu.Unlock()
+
+	_, err := r.bus.Publish(ctx, types.Event{
+		Kind:      types.EventModelStarted,
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("publish model started event: %w", err)
+	}
+
+	resp, err := provider.Respond(ctx, types.ModelRequest{
+		Messages: messages,
+	})
+	if err != nil {
+		_, _ = r.bus.Publish(ctx, types.NewRunErrorEvent(time.Now().UTC(), err))
+		return fmt.Errorf("provider respond: %w", err)
+	}
+
+	r.mu.Lock()
+	r.messages = append(r.messages, resp.Message)
+	r.mu.Unlock()
+
+	_, err = r.bus.Publish(ctx, types.Event{
+		Kind:      types.EventModelMessageCompleted,
+		CreatedAt: time.Now().UTC(),
+		Message:   &resp.Message,
+	})
+	if err != nil {
+		return fmt.Errorf("publish model completed event: %w", err)
 	}
 
 	return nil
