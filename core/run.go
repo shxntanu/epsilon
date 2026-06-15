@@ -22,7 +22,7 @@ var (
 type Run struct {
 	id       string
 	bus      *events.Bus
-	provider Provider
+	provider types.Provider
 	tools    *tools.Registry
 	broker   permissions.Broker
 	mu       sync.Mutex
@@ -31,7 +31,7 @@ type Run struct {
 }
 
 // harness will create a run for the users
-func newRun(id string, eventBufferSize int, provider Provider, toolRegistry *tools.Registry,
+func newRun(id string, eventBufferSize int, provider types.Provider, toolRegistry *tools.Registry,
 	broker permissions.Broker, eventStore events.Store) *Run {
 	return &Run{
 		id:       id,
@@ -42,8 +42,9 @@ func newRun(id string, eventBufferSize int, provider Provider, toolRegistry *too
 	}
 }
 
-func newRunFromHistory(id string, eventBufferSize int, provider Provider, toolRegistry *tools.Registry,
-	broker permissions.Broker, eventStore events.Store, history []types.Event) *Run {
+func newRunFromHistory(id string, eventBufferSize int, provider types.Provider,
+	toolRegistry *tools.Registry, broker permissions.Broker, eventStore events.Store,
+	history []types.Event) *Run {
 	return &Run{
 		id:       id,
 		bus:      events.NewBusFromHistory(id, eventBufferSize, eventStore, history),

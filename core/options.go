@@ -6,6 +6,7 @@ import (
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/tools"
+	"github.com/shxntanu/epsilon/core/types"
 )
 
 type Option func(*Harness) error
@@ -24,7 +25,7 @@ func WithRunIDGenerator(fn func() (string, error)) Option {
 	}
 }
 
-func WithProvider(provider Provider) Option {
+func WithProvider(provider types.Provider) Option {
 	return func(h *Harness) error {
 		h.provider = provider
 		return nil

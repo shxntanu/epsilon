@@ -20,7 +20,7 @@ type Harness struct {
 	runs             map[string]*Run
 	eventBufferSize  int
 	newRunID         func() (string, error)
-	provider         Provider
+	provider         types.Provider
 	toolRegistry     *tools.Registry
 	permissionBroker permissions.Broker
 	eventStore       events.Store
