@@ -28,6 +28,7 @@ type Bus struct {
 	nextSubID   uint64
 	closed      bool
 	subscribers map[uint64]chan types.Event
+	store       Store
 
 	// history for replaying events
 	history []types.Event
@@ -35,6 +36,11 @@ type Bus struct {
 
 // NewBus returns an event bus for one run.
 func NewBus(runID string, bufferSize int) *Bus {
+	return NewBusWithStore(runID, bufferSize, nil)
+}
+
+// NewBusWithStore returns an event bus for one run with optional persistence.
+func NewBusWithStore(runID string, bufferSize int, store Store) *Bus {
 	if bufferSize <= 0 {
 		bufferSize = defaultBufferSize
 	}
@@ -43,6 +49,7 @@ func NewBus(runID string, bufferSize int) *Bus {
 		runID:       runID,
 		bufferSize:  bufferSize,
 		subscribers: make(map[uint64]chan types.Event),
+		store:       store,
 	}
 }
 
@@ -93,7 +100,12 @@ func (b *Bus) Publish(ctx context.Context, event types.Event) (types.Event, erro
 		event.CreatedAt = time.Now().UTC()
 	}
 
-	// save the event to the array
+	if b.store != nil {
+		if err := b.store.Append(ctx, event); err != nil {
+			return types.Event{}, fmt.Errorf("persist event: %w", err)
+		}
+	}
+
 	b.history = append(b.history, event)
 
 	for _, subscriber := range b.subscribers {

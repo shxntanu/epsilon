@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
@@ -21,6 +22,7 @@ type Harness struct {
 	provider         Provider
 	toolRegistry     *tools.Registry
 	permissionBroker permissions.Broker
+	eventStore       events.Store
 }
 
 const defaultEventBufferSize = 64
@@ -55,7 +57,8 @@ func (h *Harness) Start(ctx context.Context) (*Run, error) {
 		return nil, fmt.Errorf("create run ID: %w", err)
 	}
 
-	run := newRun(id, h.eventBufferSize, h.provider, h.toolRegistry, h.permissionBroker)
+	run := newRun(id, h.eventBufferSize, h.provider, h.toolRegistry,
+		h.permissionBroker, h.eventStore)
 
 	h.mu.Lock()
 	h.runs[id] = run

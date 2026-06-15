@@ -32,10 +32,10 @@ type Run struct {
 
 // harness will create a run for the users
 func newRun(id string, eventBufferSize int, provider Provider, toolRegistry *tools.Registry,
-	broker permissions.Broker) *Run {
+	broker permissions.Broker, eventStore events.Store) *Run {
 	return &Run{
 		id:       id,
-		bus:      events.NewBus(id, eventBufferSize),
+		bus:      events.NewBusWithStore(id, eventBufferSize, eventStore),
 		provider: provider,
 		tools:    toolRegistry,
 		broker:   broker,
@@ -168,7 +168,8 @@ func (r *Run) Step(ctx context.Context) error {
 	return nil
 }
 
-func (r *Run) executeToolCalls(ctx context.Context, calls []types.ToolCall, registry *tools.Registry) error {
+func (r *Run) executeToolCalls(ctx context.Context, calls []types.ToolCall,
+	registry *tools.Registry) error {
 	for _, call := range calls {
 		if _, err := r.bus.Publish(ctx, types.NewToolCallRequestedEvent(
 			time.Now().UTC(), call)); err != nil {
