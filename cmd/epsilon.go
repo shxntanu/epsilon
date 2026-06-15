@@ -15,10 +15,21 @@ import (
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/providers/fake"
+	"github.com/shxntanu/epsilon/core/providers/litellm"
 	"github.com/shxntanu/epsilon/core/types"
 )
 
 const defaultSessionDir = ".epsilon/sessions"
+
+type harnessConfig struct {
+	sessionDir     string
+	workspace      string
+	provider       string
+	model          string
+	litellmBaseURL string
+	litellmAPIKey  string
+	allowAll       bool
+}
 
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
@@ -55,6 +66,10 @@ func runCommand(ctx context.Context, args []string) error {
 	sessionDir := fs.String("session-dir", defaultSessionDir, "directory for persisted sessions")
 	workspace := fs.String("workspace", ".", "workspace root for file tools")
 	allowAll := fs.Bool("y", false, "allow permission requests without prompting")
+	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", "fake"), "provider to use: fake or litellm")
+	model := fs.String("model", os.Getenv("LITELLM_MODEL"), "model name for LiteLLM")
+	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", "http://localhost:4000"), "LiteLLM proxy base URL")
+	litellmAPIKey := fs.String("litellm-api-key", os.Getenv("LITELLM_API_KEY"), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -64,7 +79,15 @@ func runCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	harness, err := newHarness(*sessionDir, *workspace, *allowAll)
+	harness, err := newHarness(harnessConfig{
+		sessionDir:     *sessionDir,
+		workspace:      *workspace,
+		provider:       *provider,
+		model:          *model,
+		litellmBaseURL: *litellmBaseURL,
+		litellmAPIKey:  *litellmAPIKey,
+		allowAll:       *allowAll,
+	})
 	if err != nil {
 		return err
 	}
@@ -98,6 +121,10 @@ func resumeCommand(ctx context.Context, args []string) error {
 	sessionDir := fs.String("session-dir", defaultSessionDir, "directory for persisted sessions")
 	workspace := fs.String("workspace", ".", "workspace root for file tools")
 	allowAll := fs.Bool("y", false, "allow permission requests without prompting")
+	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", "fake"), "provider to use: fake or litellm")
+	model := fs.String("model", os.Getenv("LITELLM_MODEL"), "model name for LiteLLM")
+	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", "http://localhost:4000"), "LiteLLM proxy base URL")
+	litellmAPIKey := fs.String("litellm-api-key", os.Getenv("LITELLM_API_KEY"), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -108,7 +135,15 @@ func resumeCommand(ctx context.Context, args []string) error {
 	}
 	runID := remaining[0]
 
-	harness, err := newHarness(*sessionDir, *workspace, *allowAll)
+	harness, err := newHarness(harnessConfig{
+		sessionDir:     *sessionDir,
+		workspace:      *workspace,
+		provider:       *provider,
+		model:          *model,
+		litellmBaseURL: *litellmBaseURL,
+		litellmAPIKey:  *litellmAPIKey,
+		allowAll:       *allowAll,
+	})
 	if err != nil {
 		return err
 	}
@@ -168,18 +203,38 @@ func eventsCommand(ctx context.Context, args []string) error {
 	return nil
 }
 
-func newHarness(sessionDir string, workspace string, allowAll bool) (*core.Harness, error) {
+func newHarness(config harnessConfig) (*core.Harness, error) {
 	broker := permissions.Broker(promptBroker{})
-	if allowAll {
+	if config.allowAll {
 		broker = permissions.NewAllowBroker()
 	}
 
+	provider, err := newProvider(config)
+	if err != nil {
+		return nil, err
+	}
+
 	return core.New(
-		core.WithProvider(fake.New()),
-		core.WithDefaultTools(workspace),
-		core.WithSessionDir(sessionDir),
+		core.WithProvider(provider),
+		core.WithDefaultTools(config.workspace),
+		core.WithSessionDir(config.sessionDir),
 		core.WithPermissionBroker(broker),
 	)
+}
+
+func newProvider(config harnessConfig) (types.Provider, error) {
+	switch strings.ToLower(strings.TrimSpace(config.provider)) {
+	case "", "fake":
+		return fake.New(), nil
+	case "litellm":
+		return litellm.New(litellm.Config{
+			BaseURL: config.litellmBaseURL,
+			APIKey:  config.litellmAPIKey,
+			Model:   config.model,
+		})
+	default:
+		return nil, fmt.Errorf("unknown provider %q", config.provider)
+	}
 }
 
 func messageFromArgs(args []string) (string, error) {
@@ -285,6 +340,12 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  tool:echo hello")
 	fmt.Fprintln(w, "  tool:read README.md")
 	fmt.Fprintln(w, "  tool:write scratch.txt hello")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "provider flags:")
+	fmt.Fprintln(w, "  -provider fake|litellm")
+	fmt.Fprintln(w, "  -litellm-base-url http://localhost:4000")
+	fmt.Fprintln(w, "  -litellm-api-key <key>")
+	fmt.Fprintln(w, "  -model <model>")
 }
 
 type promptBroker struct{}
@@ -318,4 +379,13 @@ func (promptBroker) Decide(ctx context.Context,
 		Decision: decision,
 		Reason:   reason,
 	}, nil
+}
+
+func envOrDefault(name string, fallback string) string {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	return value
 }
