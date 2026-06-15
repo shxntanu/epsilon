@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 
+	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/tools"
 )
 
@@ -25,6 +26,13 @@ func WithRunIDGenerator(fn func() (string, error)) Option {
 func WithProvider(provider Provider) Option {
 	return func(h *Harness) error {
 		h.provider = provider
+		return nil
+	}
+}
+
+func WithPermissionBroker(broker permissions.Broker) Option {
+	return func(h *Harness) error {
+		h.permissionBroker = broker
 		return nil
 	}
 }

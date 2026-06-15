@@ -14,3 +14,23 @@ type Tool interface {
 	InputSchema() json.RawMessage
 	Run(ctx context.Context, input json.RawMessage) (*types.ToolResult, error)
 }
+
+// Permissioner can be implemented by tools that want to declare their default permission mode.
+type Permissioner interface {
+	Permission() types.PermissionMode
+}
+
+// Permission returns the permission mode for a tool.
+func Permission(tool Tool) types.PermissionMode {
+	permissioner, ok := tool.(Permissioner)
+	if !ok {
+		return types.PermissionAsk
+	}
+
+	mode := permissioner.Permission()
+	if mode == "" {
+		return types.PermissionAsk
+	}
+
+	return mode
+}

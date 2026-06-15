@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shxntanu/epsilon/core/events"
+	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
 )
@@ -23,18 +24,21 @@ type Run struct {
 	bus      *events.Bus
 	provider Provider
 	tools    *tools.Registry
+	broker   permissions.Broker
 	mu       sync.Mutex
 	closed   bool
 	messages []types.Message
 }
 
 // harness will create a run for the users
-func newRun(id string, eventBufferSize int, provider Provider, toolRegistry *tools.Registry) *Run {
+func newRun(id string, eventBufferSize int, provider Provider, toolRegistry *tools.Registry,
+	broker permissions.Broker) *Run {
 	return &Run{
 		id:       id,
 		bus:      events.NewBus(id, eventBufferSize),
 		provider: provider,
 		tools:    toolRegistry,
+		broker:   broker,
 	}
 }
 
@@ -166,7 +170,8 @@ func (r *Run) Step(ctx context.Context) error {
 
 func (r *Run) executeToolCalls(ctx context.Context, calls []types.ToolCall, registry *tools.Registry) error {
 	for _, call := range calls {
-		if _, err := r.bus.Publish(ctx, types.NewToolCallRequestedEvent(time.Now().UTC(), call)); err != nil {
+		if _, err := r.bus.Publish(ctx, types.NewToolCallRequestedEvent(
+			time.Now().UTC(), call)); err != nil {
 			return fmt.Errorf("publish tool call requested event: %w", err)
 		}
 
@@ -208,6 +213,18 @@ func (r *Run) executeToolCall(ctx context.Context, call types.ToolCall,
 		return result, nil
 	}
 
+	allowed, deniedResult, err := r.authorizeToolCall(ctx, call, tool)
+	if err != nil {
+		return types.ToolResult{}, err
+	}
+	if !allowed {
+		if _, err := r.bus.Publish(ctx, types.NewToolCallCompletedEvent(
+			time.Now().UTC(), call, deniedResult)); err != nil {
+			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
+		}
+		return deniedResult, nil
+	}
+
 	if _, err := r.bus.Publish(ctx, types.NewToolCallStartedEvent(
 		time.Now().UTC(), call)); err != nil {
 		return types.ToolResult{}, fmt.Errorf("publish tool call started event: %w", err)
@@ -232,4 +249,92 @@ func (r *Run) executeToolCall(ctx context.Context, call types.ToolCall,
 	}
 
 	return *result, nil
+}
+
+func (r *Run) authorizeToolCall(ctx context.Context, call types.ToolCall,
+	tool tools.Tool) (bool, types.ToolResult, error) {
+	mode := tools.Permission(tool)
+	request := types.PermissionRequest{
+		RunID:      r.id,
+		ToolCallID: call.ID,
+		ToolName:   call.Name,
+		Input:      call.Input,
+		Mode:       mode,
+		Reason:     "tool requested by model",
+	}
+
+	switch mode {
+	case types.PermissionAllow:
+		return true, types.ToolResult{}, nil
+	case types.PermissionDeny:
+		result := types.PermissionResult{
+			Request:  request,
+			Decision: types.PermissionDecisionDeny,
+			Reason:   "denied by tool permission policy",
+		}
+		if _, err := r.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+			time.Now().UTC(), result)); err != nil {
+			return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
+		}
+		return false, types.ErrorToolResult(result.Reason), nil
+	case types.PermissionAsk:
+	default:
+		request.Mode = types.PermissionAsk
+	}
+
+	if _, err := r.bus.Publish(ctx, types.NewPermissionRequestedEvent(
+		time.Now().UTC(), request)); err != nil {
+		return false, types.ToolResult{}, fmt.Errorf("publish permission requested event: %w", err)
+	}
+
+	if r.broker == nil {
+		result := types.PermissionResult{
+			Request:  request,
+			Decision: types.PermissionDecisionDeny,
+			Reason:   "no permission broker configured",
+		}
+		if _, err := r.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+			time.Now().UTC(), result)); err != nil {
+			return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
+		}
+		return false, types.ErrorToolResult(result.Reason), nil
+	}
+
+	result, err := r.broker.Decide(ctx, request)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			_, _ = r.bus.Publish(ctx, types.NewRunErrorEvent(time.Now().UTC(), err))
+		}
+		return false, types.ToolResult{}, fmt.Errorf("decide permission for tool %q: %w",
+			call.Name, err)
+	}
+	if result.Request.ToolName == "" {
+		result.Request = request
+	}
+
+	switch result.Decision {
+	case types.PermissionDecisionAllow:
+		if _, err := r.bus.Publish(ctx, types.NewPermissionGrantedEvent(
+			time.Now().UTC(), result)); err != nil {
+			return false, types.ToolResult{}, fmt.Errorf("publish permission granted event: %w", err)
+		}
+		return true, types.ToolResult{}, nil
+	case types.PermissionDecisionDeny:
+		if result.Reason == "" {
+			result.Reason = "permission denied"
+		}
+		if _, err := r.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+			time.Now().UTC(), result)); err != nil {
+			return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
+		}
+		return false, types.ErrorToolResult(result.Reason), nil
+	default:
+		result.Decision = types.PermissionDecisionDeny
+		result.Reason = "permission broker returned an invalid decision"
+		if _, err := r.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+			time.Now().UTC(), result)); err != nil {
+			return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
+		}
+		return false, types.ErrorToolResult(result.Reason), nil
+	}
 }

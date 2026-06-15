@@ -50,6 +50,11 @@ func (t *WriteFileTool) InputSchema() json.RawMessage {
 		`replace an existing file."}},"required":["path","content"],"additionalProperties":false}`)
 }
 
+// Permission returns the default permission mode for this tool.
+func (t *WriteFileTool) Permission() types.PermissionMode {
+	return types.PermissionAsk
+}
+
 // Run executes the tool.
 func (t *WriteFileTool) Run(ctx context.Context, input json.RawMessage) (*types.ToolResult, error) {
 	select {

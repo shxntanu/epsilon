@@ -48,6 +48,11 @@ func (t *ReadFileTool) InputSchema() json.RawMessage {
 		`:"Workspace-relative path to read."}},"required":["path"],"additionalProperties":false}`)
 }
 
+// Permission returns the default permission mode for this tool.
+func (t *ReadFileTool) Permission() types.PermissionMode {
+	return types.PermissionAllow
+}
+
 // Run executes the tool.
 func (t *ReadFileTool) Run(ctx context.Context, input json.RawMessage) (*types.ToolResult, error) {
 	select {

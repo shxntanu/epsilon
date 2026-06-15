@@ -32,6 +32,11 @@ func (t *EchoTool) InputSchema() json.RawMessage {
 		`:"Text to echo back."}},"required":["text"],"additionalProperties":false}`)
 }
 
+// Permission returns the default permission mode for this tool.
+func (t *EchoTool) Permission() types.PermissionMode {
+	return types.PermissionAllow
+}
+
 // Run executes the tool.
 func (t *EchoTool) Run(ctx context.Context, input json.RawMessage) (*types.ToolResult, error) {
 	select {

@@ -12,6 +12,9 @@ const (
 	EventModelTextDelta        EventKind = "model_text_delta"
 	EventModelMessageCompleted EventKind = "model_message_completed"
 	EventToolCallRequested     EventKind = "tool_call_requested"
+	EventPermissionRequested   EventKind = "permission_requested"
+	EventPermissionGranted     EventKind = "permission_granted"
+	EventPermissionDenied      EventKind = "permission_denied"
 	EventToolCallStarted       EventKind = "tool_call_started"
 	EventToolCallCompleted     EventKind = "tool_call_completed"
 	EventRunCompleted          EventKind = "run_completed"
@@ -26,11 +29,12 @@ type Event struct {
 	Kind      EventKind `json:"kind"`
 	CreatedAt time.Time `json:"created_at"`
 
-	Message    *Message    `json:"message,omitempty"`
-	TextDelta  string      `json:"text_delta,omitempty"`
-	ToolCall   *ToolCall   `json:"tool_call,omitempty"`
-	ToolResult *ToolResult `json:"tool_result,omitempty"`
-	Error      string      `json:"error,omitempty"`
+	Message    *Message          `json:"message,omitempty"`
+	TextDelta  string            `json:"text_delta,omitempty"`
+	ToolCall   *ToolCall         `json:"tool_call,omitempty"`
+	ToolResult *ToolResult       `json:"tool_result,omitempty"`
+	Permission *PermissionResult `json:"permission,omitempty"`
+	Error      string            `json:"error,omitempty"`
 }
 
 // NewRunStartedEvent returns an event for the beginning of a run.
@@ -65,6 +69,35 @@ func NewToolCallRequestedEvent(now time.Time, call ToolCall) Event {
 		Kind:      EventToolCallRequested,
 		CreatedAt: now,
 		ToolCall:  &call,
+	}
+}
+
+// NewPermissionRequestedEvent returns an event for a permission request.
+func NewPermissionRequestedEvent(now time.Time, request PermissionRequest) Event {
+	return Event{
+		Kind:      EventPermissionRequested,
+		CreatedAt: now,
+		Permission: &PermissionResult{
+			Request: request,
+		},
+	}
+}
+
+// NewPermissionGrantedEvent returns an event for an allowed permission decision.
+func NewPermissionGrantedEvent(now time.Time, result PermissionResult) Event {
+	return Event{
+		Kind:       EventPermissionGranted,
+		CreatedAt:  now,
+		Permission: &result,
+	}
+}
+
+// NewPermissionDeniedEvent returns an event for a denied permission decision.
+func NewPermissionDeniedEvent(now time.Time, result PermissionResult) Event {
+	return Event{
+		Kind:       EventPermissionDenied,
+		CreatedAt:  now,
+		Permission: &result,
 	}
 }
 
