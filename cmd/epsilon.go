@@ -47,6 +47,8 @@ func run(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "run":
 		return runCommand(ctx, args[1:])
+	case "tui":
+		return tuiCommand(ctx, args[1:])
 	case "resume":
 		return resumeCommand(ctx, args[1:])
 	case "events":
@@ -333,6 +335,7 @@ func truncate(text string, limit int) string {
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage:")
 	fmt.Fprintln(w, "  epsilon run [flags] <message>")
+	fmt.Fprintln(w, "  epsilon tui [flags] [run-id]")
 	fmt.Fprintln(w, "  epsilon resume [flags] <run-id> [message]")
 	fmt.Fprintln(w, "  epsilon events [flags] <run-id>")
 	fmt.Fprintln(w)
