@@ -64,6 +64,10 @@ func New(config Config) (*Provider, error) {
 	}, nil
 }
 
+func (p *Provider) SelectedModel() string {
+	return p.model
+}
+
 // Respond sends a chat completion request to the LiteLLM proxy.
 func (p *Provider) Respond(ctx context.Context,
 	req types.ModelRequest) (*types.ModelResponse, error) {

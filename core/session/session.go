@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/tools"
@@ -143,6 +144,13 @@ func (s *Session) Messages() []types.Message {
 	messages := make([]types.Message, len(s.messages))
 	copy(messages, s.messages)
 	return messages
+}
+
+func (s *Session) ContextSummary(tracker *contextwindow.Tracker) contextwindow.Summary {
+	if tracker == nil {
+		tracker = contextwindow.DefaultTracker()
+	}
+	return tracker.Analyze(s.Messages())
 }
 
 // Close marks the session closed and emits a completion event.

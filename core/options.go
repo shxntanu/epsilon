@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 
+	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/slash"
@@ -43,6 +44,22 @@ func WithPermissionBroker(broker permissions.Broker) Option {
 func WithSlashCommand(command slash.Command) Option {
 	return func(h *Harness) error {
 		h.slashRegistry.Register(command)
+		return nil
+	}
+}
+
+func WithContextWindow(config contextwindow.Config) Option {
+	return func(h *Harness) error {
+		h.contextTracker = contextwindow.NewTracker(config)
+		return nil
+	}
+}
+
+func WithContextWindowTokens(maxTokens int) Option {
+	return func(h *Harness) error {
+		h.contextTracker = contextwindow.NewTracker(contextwindow.Config{
+			MaxTokens: maxTokens,
+		})
 		return nil
 	}
 }

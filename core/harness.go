@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/session"
@@ -24,6 +25,7 @@ type Harness struct {
 	provider         types.Provider
 	toolRegistry     *tools.Registry
 	slashRegistry    *slash.Registry
+	contextTracker   *contextwindow.Tracker
 	permissionBroker permissions.Broker
 	eventStore       events.Store
 }
@@ -39,6 +41,7 @@ func New(opts ...Option) (*Harness, error) {
 		newSessionID:    randomSessionID,
 		toolRegistry:    tools.NewRegistry(),
 		slashRegistry:   slash.NewDefaultRegistry(),
+		contextTracker:  contextwindow.DefaultTracker(),
 	}
 
 	for _, opt := range opts {
@@ -121,6 +124,15 @@ func (h *Harness) GetSession(id string) (*session.Session, bool) {
 
 func (h *Harness) SlashCommands() *slash.Registry {
 	return h.slashRegistry
+}
+
+func (h *Harness) ContextSummary(sessionID string) (contextwindow.Summary, bool) {
+	sess, ok := h.GetSession(sessionID)
+	if !ok {
+		return contextwindow.Summary{}, false
+	}
+
+	return sess.ContextSummary(h.contextTracker), true
 }
 
 func randomSessionID() (string, error) {
