@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -69,7 +68,7 @@ type model struct {
 	ctx      context.Context
 	run      *core.Run
 	events   <-chan types.Event
-	input    textinput.Model
+	chatBox  chatBox
 	viewport viewport.Model
 	log      []string
 	logDirty bool
@@ -93,11 +92,6 @@ type styles struct {
 }
 
 func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) model {
-	input := textinput.New()
-	input.Placeholder = "Ask epsilon..."
-	input.Prompt = "> "
-	input.Focus()
-
 	vp := viewport.New()
 	vp.SoftWrap = true
 
@@ -117,7 +111,7 @@ func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) mod
 		ctx:      ctx,
 		run:      run,
 		events:   events,
-		input:    input,
+		chatBox:  newChatBox(),
 		viewport: vp,
 		status:   "ready",
 		styles:   styles,
@@ -127,7 +121,7 @@ func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) mod
 }
 
 func (m model) Init() tea.Cmd {
-	return m.waitForEvent()
+	return tea.Batch(m.chatBox.Init(), m.waitForEvent())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -149,7 +143,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		default:
 			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
+			m.chatBox, cmd = m.chatBox.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 	case eventMsg:
@@ -171,7 +165,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		cmds = append(cmds, cmd)
-		m.input, cmd = m.input.Update(msg)
+		m.chatBox, cmd = m.chatBox.Update(msg)
 		cmds = append(cmds, cmd)
 	}
 
@@ -183,10 +177,10 @@ func (m model) View() tea.View {
 	header := m.styles.title.Render("epsilon") + " " +
 		m.styles.muted.Render(m.run.ID()) + " " +
 		m.styles.status.Render(m.status)
-	help := m.styles.help.Render("enter send | esc/ctrl+c quit | tools: echo/read/write")
+	help := m.styles.help.Render("enter send | shift+enter newline | esc/ctrl+c quit | tools: echo/read/write")
 
 	body := m.styles.border.Width(max(0, m.width-2)).Render(m.viewport.View())
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body, m.input.View(), help)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, body, m.chatBox.View(), help)
 
 	var view tea.View
 	view.SetContent(content)
@@ -195,14 +189,13 @@ func (m model) View() tea.View {
 }
 
 func (m *model) resize() {
-	inputHeight := 1
 	headerHeight := 1
 	helpHeight := 1
 	borderPadding := 2
-	viewportHeight := max(3, m.height-headerHeight-inputHeight-helpHeight-borderPadding)
+	m.chatBox.SetWidth(m.width)
+	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-borderPadding)
 	viewportWidth := max(20, m.width-4)
 
-	m.input.SetWidth(max(20, m.width-4))
 	m.viewport.SetWidth(viewportWidth)
 	m.viewport.SetHeight(viewportHeight)
 }
@@ -212,12 +205,11 @@ func (m *model) submit() tea.Cmd {
 		return nil
 	}
 
-	text := strings.TrimSpace(m.input.Value())
-	if text == "" {
+	text, ok := m.chatBox.Submit()
+	if !ok {
 		return nil
 	}
 
-	m.input.SetValue("")
 	m.busy = true
 	m.status = "thinking"
 
