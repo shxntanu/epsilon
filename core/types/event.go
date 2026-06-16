@@ -2,11 +2,11 @@ package types
 
 import "time"
 
-// EventKind identifies what happened during a run.
+// EventKind identifies what happened during a session.
 type EventKind string
 
 const (
-	EventRunStarted            EventKind = "run_started"
+	EventSessionStarted        EventKind = "session_started"
 	EventUserMessageAdded      EventKind = "user_message_added"
 	EventModelStarted          EventKind = "model_started"
 	EventModelTextDelta        EventKind = "model_text_delta"
@@ -17,14 +17,14 @@ const (
 	EventPermissionDenied      EventKind = "permission_denied"
 	EventToolCallStarted       EventKind = "tool_call_started"
 	EventToolCallCompleted     EventKind = "tool_call_completed"
-	EventRunCompleted          EventKind = "run_completed"
-	EventRunError              EventKind = "run_error"
+	EventSessionCompleted      EventKind = "session_completed"
+	EventSessionError          EventKind = "session_error"
 )
 
 // Event is an append-only fact emitted by the harness.
 type Event struct {
 	ID        string    `json:"id,omitempty"`
-	RunID     string    `json:"run_id,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
 	Sequence  int64     `json:"sequence,omitempty"`
 	Kind      EventKind `json:"kind"`
 	CreatedAt time.Time `json:"created_at"`
@@ -37,10 +37,10 @@ type Event struct {
 	Error      string            `json:"error,omitempty"`
 }
 
-// NewRunStartedEvent returns an event for the beginning of a run.
-func NewRunStartedEvent(now time.Time) Event {
+// NewSessionStartedEvent returns an event for the beginning of a session.
+func NewSessionStartedEvent(now time.Time) Event {
 	return Event{
-		Kind:      EventRunStarted,
+		Kind:      EventSessionStarted,
 		CreatedAt: now,
 	}
 }
@@ -120,10 +120,10 @@ func NewToolCallCompletedEvent(now time.Time, call ToolCall, result ToolResult) 
 	}
 }
 
-// NewRunErrorEvent returns an event for a run-level error.
-func NewRunErrorEvent(now time.Time, err error) Event {
+// NewSessionErrorEvent returns an event for a session-level error.
+func NewSessionErrorEvent(now time.Time, err error) Event {
 	return Event{
-		Kind:      EventRunError,
+		Kind:      EventSessionError,
 		CreatedAt: now,
 		Error:     err.Error(),
 	}

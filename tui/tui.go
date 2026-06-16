@@ -14,33 +14,34 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/shxntanu/epsilon/core"
+	"github.com/shxntanu/epsilon/core/session"
 	"github.com/shxntanu/epsilon/core/types"
 )
 
 // Config configures a TUI session.
 type Config struct {
-	Harness *core.Harness
-	RunID   string
+	Harness   *core.Harness
+	SessionID string
 }
 
-// Run starts the TUI.
-func Run(ctx context.Context, config Config) error {
+// Start starts the TUI.
+func Start(ctx context.Context, config Config) error {
 	if config.Harness == nil {
 		return fmt.Errorf("harness is nil")
 	}
 
-	run, err := startOrResume(ctx, config)
+	sess, err := startOrResume(ctx, config)
 	if err != nil {
 		return err
 	}
 
-	sub, err := run.Subscribe()
+	sub, err := sess.Subscribe()
 	if err != nil {
 		return err
 	}
 	defer sub.Close()
 
-	program := tea.NewProgram(newModel(ctx, run, sub.Events()), tea.WithContext(ctx))
+	program := tea.NewProgram(newModel(ctx, sess, sub.Events()), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
 			return ctx.Err()
@@ -51,12 +52,12 @@ func Run(ctx context.Context, config Config) error {
 	return nil
 }
 
-func startOrResume(ctx context.Context, config Config) (*core.Run, error) {
-	if strings.TrimSpace(config.RunID) == "" {
-		return config.Harness.Start(ctx)
+func startOrResume(ctx context.Context, config Config) (*session.Session, error) {
+	if strings.TrimSpace(config.SessionID) == "" {
+		return config.Harness.StartSession(ctx)
 	}
 
-	return config.Harness.Resume(ctx, config.RunID)
+	return config.Harness.ResumeSession(ctx, config.SessionID)
 }
 
 type eventMsg types.Event
@@ -67,7 +68,7 @@ type stepDoneMsg struct {
 
 type model struct {
 	ctx          context.Context
-	run          *core.Run
+	session      *session.Session
 	events       <-chan types.Event
 	chatBox      chatBox
 	spinner      spinner.Model
@@ -126,7 +127,7 @@ func (d densityMode) Label() string {
 	return "comfortable"
 }
 
-func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) model {
+func newModel(ctx context.Context, sess *session.Session, events <-chan types.Event) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
 
@@ -148,7 +149,7 @@ func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) mod
 
 	return model{
 		ctx:      ctx,
-		run:      run,
+		session:  sess,
 		events:   events,
 		chatBox:  newChatBox(),
 		spinner:  spin,
@@ -157,7 +158,7 @@ func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) mod
 		status:   "ready",
 		styles:   styles,
 		entries: []transcriptEntry{
-			{kind: transcriptEvent, text: styles.muted.Render("Started run " + run.ID())},
+			{kind: transcriptEvent, text: styles.muted.Render("Started session " + sess.ID())},
 		},
 		dirty: true,
 	}
@@ -232,7 +233,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() tea.View {
 	header := m.styles.title.Render("epsilon") + " " +
-		m.styles.muted.Render(m.run.ID()) + " " +
+		m.styles.muted.Render(m.session.ID()) + " " +
 		m.styles.status.Render(m.status)
 	help := m.styles.help.Render("enter send | shift+enter newline | ctrl+o events:" +
 		onOff(m.showEvents) + " | ctrl+t density:" + m.density.Label() + " | esc quit")
@@ -285,17 +286,17 @@ func (m *model) submit() tea.Cmd {
 	m.status = "thinking"
 	m.dirty = true
 
-	runStep := func() tea.Msg {
-		if err := m.run.Send(m.ctx, types.UserMessage(text)); err != nil {
+	sessionStep := func() tea.Msg {
+		if err := m.session.Send(m.ctx, types.UserMessage(text)); err != nil {
 			return stepDoneMsg{err: err}
 		}
-		if err := m.run.Step(m.ctx); err != nil {
+		if err := m.session.Step(m.ctx); err != nil {
 			return stepDoneMsg{err: err}
 		}
 		return stepDoneMsg{}
 	}
 
-	return tea.Batch(m.spinner.Tick, runStep)
+	return tea.Batch(m.spinner.Tick, sessionStep)
 }
 
 func (m model) waitForEvent() tea.Cmd {
@@ -361,9 +362,9 @@ func (m *model) addEvent(event types.Event) {
 			m.appendEvent(m.styles.tool.Render(string(event.Kind)) + ": " +
 				event.Permission.Reason)
 		}
-	case types.EventRunError:
+	case types.EventSessionError:
 		if event.Error != "" {
-			m.appendPlain(m.styles.error.Render("run error: " + event.Error))
+			m.appendPlain(m.styles.error.Render("session error: " + event.Error))
 		}
 	}
 }

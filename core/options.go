@@ -18,9 +18,9 @@ func WithEventBufferSize(size int) Option {
 	}
 }
 
-func WithRunIDGenerator(fn func() (string, error)) Option {
+func WithSessionIDGenerator(fn func() (string, error)) Option {
 	return func(h *Harness) error {
-		h.newRunID = fn
+		h.newSessionID = fn
 		return nil
 	}
 }

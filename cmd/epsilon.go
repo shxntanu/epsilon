@@ -32,13 +32,13 @@ type harnessConfig struct {
 }
 
 func main() {
-	if err := run(context.Background(), os.Args[1:]); err != nil {
+	if err := execute(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "epsilon:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args []string) error {
+func execute(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		printUsage(os.Stderr)
 		return fmt.Errorf("missing command")
@@ -94,25 +94,25 @@ func runCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	run, err := harness.Start(ctx)
+	sess, err := harness.StartSession(ctx)
 	if err != nil {
 		return err
 	}
 
-	sub, err := run.Subscribe()
+	sub, err := sess.Subscribe()
 	if err != nil {
 		return err
 	}
 	defer sub.Close()
 
-	if err := run.Send(ctx, types.UserMessage(message)); err != nil {
+	if err := sess.Send(ctx, types.UserMessage(message)); err != nil {
 		return err
 	}
-	if err := run.Step(ctx); err != nil {
+	if err := sess.Step(ctx); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(os.Stdout, "run_id: %s\n", run.ID())
+	fmt.Fprintf(os.Stdout, "session_id: %s\n", sess.ID())
 	drainEvents(os.Stdout, sub.Events())
 	return nil
 }
@@ -133,9 +133,9 @@ func resumeCommand(ctx context.Context, args []string) error {
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
-		return fmt.Errorf("resume requires run ID")
+		return fmt.Errorf("resume requires session ID")
 	}
-	runID := remaining[0]
+	sessionID := remaining[0]
 
 	harness, err := newHarness(harnessConfig{
 		sessionDir:     *sessionDir,
@@ -150,12 +150,12 @@ func resumeCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	run, err := harness.Resume(ctx, runID)
+	sess, err := harness.ResumeSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
 
-	sub, err := run.Subscribe()
+	sub, err := sess.Subscribe()
 	if err != nil {
 		return err
 	}
@@ -163,15 +163,15 @@ func resumeCommand(ctx context.Context, args []string) error {
 
 	if len(remaining) > 1 {
 		message := strings.Join(remaining[1:], " ")
-		if err := run.Send(ctx, types.UserMessage(message)); err != nil {
+		if err := sess.Send(ctx, types.UserMessage(message)); err != nil {
 			return err
 		}
-		if err := run.Step(ctx); err != nil {
+		if err := sess.Step(ctx); err != nil {
 			return err
 		}
 	}
 
-	fmt.Fprintf(os.Stdout, "run_id: %s\n", run.ID())
+	fmt.Fprintf(os.Stdout, "session_id: %s\n", sess.ID())
 	drainEvents(os.Stdout, sub.Events())
 	return nil
 }
@@ -186,7 +186,7 @@ func eventsCommand(ctx context.Context, args []string) error {
 
 	remaining := fs.Args()
 	if len(remaining) == 0 {
-		return fmt.Errorf("events requires run ID")
+		return fmt.Errorf("events requires session ID")
 	}
 
 	store, err := events.NewJSONLStore(*sessionDir)
@@ -335,9 +335,9 @@ func truncate(text string, limit int) string {
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage:")
 	fmt.Fprintln(w, "  epsilon run [flags] <message>")
-	fmt.Fprintln(w, "  epsilon tui [flags] [run-id]")
-	fmt.Fprintln(w, "  epsilon resume [flags] <run-id> [message]")
-	fmt.Fprintln(w, "  epsilon events [flags] <run-id>")
+	fmt.Fprintln(w, "  epsilon tui [flags] [session-id]")
+	fmt.Fprintln(w, "  epsilon resume [flags] <session-id> [message]")
+	fmt.Fprintln(w, "  epsilon events [flags] <session-id>")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "fake tool prompts:")
 	fmt.Fprintln(w, "  tool:echo hello")

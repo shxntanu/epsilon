@@ -39,8 +39,8 @@ func tuiCommand(ctx context.Context, args []string) error {
 		Harness: harness,
 	}
 	if remaining := fs.Args(); len(remaining) > 0 {
-		config.RunID = remaining[0]
+		config.SessionID = remaining[0]
 	}
 
-	return tui.Run(ctx, config)
+	return tui.Start(ctx, config)
 }

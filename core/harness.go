@@ -7,19 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
+	"github.com/shxntanu/epsilon/core/session"
 	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
 )
 
 type Harness struct {
 	mu               sync.Mutex
-	runs             map[string]*Run
+	sessions         map[string]*session.Session
 	eventBufferSize  int
-	newRunID         func() (string, error)
+	newSessionID     func() (string, error)
 	provider         types.Provider
 	toolRegistry     *tools.Registry
 	permissionBroker permissions.Broker
@@ -32,9 +32,9 @@ var ErrEventStoreMissing = errors.New("event store missing")
 
 func New(opts ...Option) (*Harness, error) {
 	h := &Harness{
-		runs:            make(map[string]*Run),
+		sessions:        make(map[string]*session.Session),
 		eventBufferSize: defaultEventBufferSize,
-		newRunID:        randomRunID,
+		newSessionID:    randomSessionID,
 		toolRegistry:    tools.NewRegistry(),
 	}
 
@@ -47,39 +47,38 @@ func New(opts ...Option) (*Harness, error) {
 	if h.eventBufferSize <= 0 {
 		return nil, fmt.Errorf("event buffer size must be positive")
 	}
-	if h.newRunID == nil {
-		return nil, fmt.Errorf("run ID generator is nil")
+	if h.newSessionID == nil {
+		return nil, fmt.Errorf("session ID generator is nil")
 	}
 
 	return h, nil
 }
 
-func (h *Harness) Start(ctx context.Context) (*Run, error) {
-	id, err := h.newRunID()
+func (h *Harness) StartSession(ctx context.Context) (*session.Session, error) {
+	id, err := h.newSessionID()
 	if err != nil {
-		return nil, fmt.Errorf("create run ID: %w", err)
+		return nil, fmt.Errorf("create session ID: %w", err)
 	}
 
-	run := newRun(id, h.eventBufferSize, h.provider, h.toolRegistry,
+	sess := session.New(id, h.eventBufferSize, h.provider, h.toolRegistry,
 		h.permissionBroker, h.eventStore)
 
 	h.mu.Lock()
-	h.runs[id] = run
+	h.sessions[id] = sess
 	h.mu.Unlock()
 
-	_, err = run.bus.Publish(ctx, types.NewRunStartedEvent(time.Now().UTC()))
-	if err != nil {
-		return nil, fmt.Errorf("publish run started event: %w", err)
+	if err := sess.Start(ctx); err != nil {
+		return nil, err
 	}
 
-	return run, nil
+	return sess, nil
 }
 
-func (h *Harness) Resume(ctx context.Context, runID string) (*Run, error) {
+func (h *Harness) ResumeSession(ctx context.Context, sessionID string) (*session.Session, error) {
 	h.mu.Lock()
-	if run, ok := h.runs[runID]; ok {
+	if sess, ok := h.sessions[sessionID]; ok {
 		h.mu.Unlock()
-		return run, nil
+		return sess, nil
 	}
 	h.mu.Unlock()
 
@@ -87,41 +86,41 @@ func (h *Harness) Resume(ctx context.Context, runID string) (*Run, error) {
 		return nil, ErrEventStoreMissing
 	}
 
-	history, err := h.eventStore.Load(ctx, runID)
+	history, err := h.eventStore.Load(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("load run events: %w", err)
+		return nil, fmt.Errorf("load session events: %w", err)
 	}
 	if len(history) == 0 {
-		return nil, fmt.Errorf("run %q has no persisted events", runID)
+		return nil, fmt.Errorf("session %q has no persisted events", sessionID)
 	}
 
-	run := newRunFromHistory(runID, h.eventBufferSize, h.provider, h.toolRegistry,
+	sess := session.FromHistory(sessionID, h.eventBufferSize, h.provider, h.toolRegistry,
 		h.permissionBroker, h.eventStore, history)
 
 	h.mu.Lock()
-	if existing, ok := h.runs[runID]; ok {
+	if existing, ok := h.sessions[sessionID]; ok {
 		h.mu.Unlock()
 		return existing, nil
 	}
-	h.runs[runID] = run
+	h.sessions[sessionID] = sess
 	h.mu.Unlock()
 
-	return run, nil
+	return sess, nil
 }
 
-func (h *Harness) GetRun(id string) (*Run, bool) {
+func (h *Harness) GetSession(id string) (*session.Session, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	run, ok := h.runs[id]
-	return run, ok
+	sess, ok := h.sessions[id]
+	return sess, ok
 }
 
-func randomRunID() (string, error) {
+func randomSessionID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("read random bytes: %w", err)
 	}
 
-	return "run_" + hex.EncodeToString(b[:]), nil
+	return "session_" + hex.EncodeToString(b[:]), nil
 }

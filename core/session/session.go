@@ -1,4 +1,4 @@
-package core
+package session
 
 import (
 	"context"
@@ -14,12 +14,12 @@ import (
 )
 
 var (
-	ErrRunClosed          = errors.New("run closed")
+	ErrClosed             = errors.New("session closed")
 	ErrInvalidMessageRole = errors.New("invalid message role")
 	ErrProviderMissing    = errors.New("provider missing")
 )
 
-type Run struct {
+type Session struct {
 	id       string
 	bus      *events.Bus
 	provider types.Provider
@@ -30,10 +30,10 @@ type Run struct {
 	messages []types.Message
 }
 
-// harness will create a run for the users
-func newRun(id string, eventBufferSize int, provider types.Provider, toolRegistry *tools.Registry,
-	broker permissions.Broker, eventStore events.Store) *Run {
-	return &Run{
+// New returns a session ready to accept messages.
+func New(id string, eventBufferSize int, provider types.Provider, toolRegistry *tools.Registry,
+	broker permissions.Broker, eventStore events.Store) *Session {
+	return &Session{
 		id:       id,
 		bus:      events.NewBusWithStore(id, eventBufferSize, eventStore),
 		provider: provider,
@@ -42,10 +42,11 @@ func newRun(id string, eventBufferSize int, provider types.Provider, toolRegistr
 	}
 }
 
-func newRunFromHistory(id string, eventBufferSize int, provider types.Provider,
+// FromHistory returns a session restored from persisted events.
+func FromHistory(id string, eventBufferSize int, provider types.Provider,
 	toolRegistry *tools.Registry, broker permissions.Broker, eventStore events.Store,
-	history []types.Event) *Run {
-	return &Run{
+	history []types.Event) *Session {
+	return &Session{
 		id:       id,
 		bus:      events.NewBusFromHistory(id, eventBufferSize, eventStore, history),
 		provider: provider,
@@ -56,12 +57,24 @@ func newRunFromHistory(id string, eventBufferSize int, provider types.Provider,
 	}
 }
 
-func (r *Run) ID() string {
-	return r.id
+// ID returns the stable session identifier.
+func (s *Session) ID() string {
+	return s.id
 }
 
-func (r *Run) Subscribe() (*events.Subscription, error) {
-	return r.bus.Subscribe()
+// Start emits the session-started event.
+func (s *Session) Start(ctx context.Context) error {
+	_, err := s.bus.Publish(ctx, types.NewSessionStartedEvent(time.Now().UTC()))
+	if err != nil {
+		return fmt.Errorf("publish session started event: %w", err)
+	}
+
+	return nil
+}
+
+// Subscribe subscribes to session events.
+func (s *Session) Subscribe() (*events.Subscription, error) {
+	return s.bus.Subscribe()
 }
 
 func messagesFromEvents(history []types.Event) []types.Message {
@@ -88,7 +101,7 @@ func messagesFromEvents(history []types.Event) []types.Message {
 
 func eventHistoryClosed(history []types.Event) bool {
 	for i := len(history) - 1; i >= 0; i-- {
-		if history[i].Kind == types.EventRunCompleted {
+		if history[i].Kind == types.EventSessionCompleted {
 			return true
 		}
 	}
@@ -98,21 +111,21 @@ func eventHistoryClosed(history []types.Event) bool {
 
 // Send is used to send messages to the bus.
 // It records state and emits an event.
-func (r *Run) Send(ctx context.Context, msg types.Message) error {
+func (s *Session) Send(ctx context.Context, msg types.Message) error {
 	if msg.Role != types.RoleUser {
 		return fmt.Errorf("%w: Send only accepts user messages", ErrInvalidMessageRole)
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if r.closed {
-		return ErrRunClosed
+	if s.closed {
+		return ErrClosed
 	}
 
-	r.messages = append(r.messages, msg)
+	s.messages = append(s.messages, msg)
 
-	_, err := r.bus.Publish(ctx, types.NewUserMessageAddedEvent(time.Now().UTC(), msg))
+	_, err := s.bus.Publish(ctx, types.NewUserMessageAddedEvent(time.Now().UTC(), msg))
 	if err != nil {
 		return fmt.Errorf("publish user message event: %w", err)
 	}
@@ -120,62 +133,62 @@ func (r *Run) Send(ctx context.Context, msg types.Message) error {
 	return nil
 }
 
-// Messages returns a snapshot of the messages sent during this run
-func (r *Run) Messages() []types.Message {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// Messages returns a snapshot of messages sent during this session.
+func (s *Session) Messages() []types.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	messages := make([]types.Message, len(r.messages))
-	copy(messages, r.messages)
+	messages := make([]types.Message, len(s.messages))
+	copy(messages, s.messages)
 	return messages
 }
 
-// TODO: Persist a run on disk after a conversation has ended
-func (r *Run) Close(ctx context.Context) error {
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
+// Close marks the session closed and emits a completion event.
+func (s *Session) Close(ctx context.Context) error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
 		return nil
 	}
-	r.closed = true
-	r.mu.Unlock()
+	s.closed = true
+	s.mu.Unlock()
 
-	defer r.bus.Close()
+	defer s.bus.Close()
 
-	_, err := r.bus.Publish(ctx, types.Event{
-		Kind:      types.EventRunCompleted,
+	_, err := s.bus.Publish(ctx, types.Event{
+		Kind:      types.EventSessionCompleted,
 		CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
-		return fmt.Errorf("publish run completed event: %w", err)
+		return fmt.Errorf("publish session completed event: %w", err)
 	}
 
 	return nil
 }
 
-func (r *Run) Step(ctx context.Context) error {
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return ErrRunClosed
+func (s *Session) Step(ctx context.Context) error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ErrClosed
 	}
-	if r.provider == nil {
-		r.mu.Unlock()
+	if s.provider == nil {
+		s.mu.Unlock()
 		return ErrProviderMissing
 	}
 
-	messages := make([]types.Message, len(r.messages))
-	copy(messages, r.messages)
-	provider := r.provider
-	toolRegistry := r.tools
-	r.mu.Unlock()
+	messages := make([]types.Message, len(s.messages))
+	copy(messages, s.messages)
+	provider := s.provider
+	toolRegistry := s.tools
+	s.mu.Unlock()
 
 	var toolDefs []types.ToolDefinition
 	if toolRegistry != nil {
 		toolDefs = toolRegistry.Definitions()
 	}
 
-	_, err := r.bus.Publish(ctx, types.Event{
+	_, err := s.bus.Publish(ctx, types.Event{
 		Kind:      types.EventModelStarted,
 		CreatedAt: time.Now().UTC(),
 	})
@@ -188,15 +201,15 @@ func (r *Run) Step(ctx context.Context) error {
 		Tools:    toolDefs,
 	})
 	if err != nil {
-		_, _ = r.bus.Publish(ctx, types.NewRunErrorEvent(time.Now().UTC(), err))
+		_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
 		return fmt.Errorf("provider respond: %w", err)
 	}
 
-	r.mu.Lock()
-	r.messages = append(r.messages, resp.Message)
-	r.mu.Unlock()
+	s.mu.Lock()
+	s.messages = append(s.messages, resp.Message)
+	s.mu.Unlock()
 
-	_, err = r.bus.Publish(ctx, types.Event{
+	_, err = s.bus.Publish(ctx, types.Event{
 		Kind:      types.EventModelMessageCompleted,
 		CreatedAt: time.Now().UTC(),
 		Message:   &resp.Message,
@@ -206,7 +219,7 @@ func (r *Run) Step(ctx context.Context) error {
 	}
 
 	if len(resp.Message.ToolCalls) > 0 {
-		if err := r.executeToolCalls(ctx, resp.Message.ToolCalls, toolRegistry); err != nil {
+		if err := s.executeToolCalls(ctx, resp.Message.ToolCalls, toolRegistry); err != nil {
 			return err
 		}
 	}
@@ -214,36 +227,36 @@ func (r *Run) Step(ctx context.Context) error {
 	return nil
 }
 
-func (r *Run) executeToolCalls(ctx context.Context, calls []types.ToolCall,
+func (s *Session) executeToolCalls(ctx context.Context, calls []types.ToolCall,
 	registry *tools.Registry) error {
 	for _, call := range calls {
-		if _, err := r.bus.Publish(ctx, types.NewToolCallRequestedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewToolCallRequestedEvent(
 			time.Now().UTC(), call)); err != nil {
 			return fmt.Errorf("publish tool call requested event: %w", err)
 		}
 
-		result, err := r.executeToolCall(ctx, call, registry)
+		result, err := s.executeToolCall(ctx, call, registry)
 		if err != nil {
 			return err
 		}
 
-		r.mu.Lock()
-		if r.closed {
-			r.mu.Unlock()
-			return ErrRunClosed
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return ErrClosed
 		}
-		r.messages = append(r.messages, types.ToolMessage(call.ID, call.Name, result))
-		r.mu.Unlock()
+		s.messages = append(s.messages, types.ToolMessage(call.ID, call.Name, result))
+		s.mu.Unlock()
 	}
 
 	return nil
 }
 
-func (r *Run) executeToolCall(ctx context.Context, call types.ToolCall,
+func (s *Session) executeToolCall(ctx context.Context, call types.ToolCall,
 	registry *tools.Registry) (types.ToolResult, error) {
 	if registry == nil {
 		result := types.ErrorToolResult("tool registry is not configured")
-		if _, err := r.bus.Publish(ctx, types.NewToolCallCompletedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewToolCallCompletedEvent(
 			time.Now().UTC(), call, result)); err != nil {
 			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
 		}
@@ -253,26 +266,26 @@ func (r *Run) executeToolCall(ctx context.Context, call types.ToolCall,
 	tool, ok := registry.Get(call.Name)
 	if !ok {
 		result := types.ErrorToolResult(fmt.Sprintf("tool %q not found", call.Name))
-		if _, err := r.bus.Publish(ctx, types.NewToolCallCompletedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewToolCallCompletedEvent(
 			time.Now().UTC(), call, result)); err != nil {
 			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
 		}
 		return result, nil
 	}
 
-	allowed, deniedResult, err := r.authorizeToolCall(ctx, call, tool)
+	allowed, deniedResult, err := s.authorizeToolCall(ctx, call, tool)
 	if err != nil {
 		return types.ToolResult{}, err
 	}
 	if !allowed {
-		if _, err := r.bus.Publish(ctx, types.NewToolCallCompletedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewToolCallCompletedEvent(
 			time.Now().UTC(), call, deniedResult)); err != nil {
 			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
 		}
 		return deniedResult, nil
 	}
 
-	if _, err := r.bus.Publish(ctx, types.NewToolCallStartedEvent(
+	if _, err := s.bus.Publish(ctx, types.NewToolCallStartedEvent(
 		time.Now().UTC(), call)); err != nil {
 		return types.ToolResult{}, fmt.Errorf("publish tool call started event: %w", err)
 	}
@@ -280,8 +293,8 @@ func (r *Run) executeToolCall(ctx context.Context, call types.ToolCall,
 	result, err := tool.Run(ctx, call.Input)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			_, _ = r.bus.Publish(ctx, types.NewRunErrorEvent(time.Now().UTC(), err))
-			return types.ToolResult{}, fmt.Errorf("run tool %q: %w", call.Name, err)
+			_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
+			return types.ToolResult{}, fmt.Errorf("execute tool %q: %w", call.Name, err)
 		}
 		errorResult := types.ErrorToolResult(err.Error())
 		result = &errorResult
@@ -290,7 +303,7 @@ func (r *Run) executeToolCall(ctx context.Context, call types.ToolCall,
 		result = &types.ToolResult{}
 	}
 
-	if _, err := r.bus.Publish(ctx, types.NewToolCallCompletedEvent(
+	if _, err := s.bus.Publish(ctx, types.NewToolCallCompletedEvent(
 		time.Now().UTC(), call, *result)); err != nil {
 		return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
 	}
@@ -298,11 +311,11 @@ func (r *Run) executeToolCall(ctx context.Context, call types.ToolCall,
 	return *result, nil
 }
 
-func (r *Run) authorizeToolCall(ctx context.Context, call types.ToolCall,
+func (s *Session) authorizeToolCall(ctx context.Context, call types.ToolCall,
 	tool tools.Tool) (bool, types.ToolResult, error) {
 	mode := tools.Permission(tool)
 	request := types.PermissionRequest{
-		RunID:      r.id,
+		SessionID:  s.id,
 		ToolCallID: call.ID,
 		ToolName:   call.Name,
 		Input:      call.Input,
@@ -319,7 +332,7 @@ func (r *Run) authorizeToolCall(ctx context.Context, call types.ToolCall,
 			Decision: types.PermissionDecisionDeny,
 			Reason:   "denied by tool permission policy",
 		}
-		if _, err := r.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewPermissionDeniedEvent(
 			time.Now().UTC(), result)); err != nil {
 			return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
 		}
@@ -329,28 +342,28 @@ func (r *Run) authorizeToolCall(ctx context.Context, call types.ToolCall,
 		request.Mode = types.PermissionAsk
 	}
 
-	if _, err := r.bus.Publish(ctx, types.NewPermissionRequestedEvent(
+	if _, err := s.bus.Publish(ctx, types.NewPermissionRequestedEvent(
 		time.Now().UTC(), request)); err != nil {
 		return false, types.ToolResult{}, fmt.Errorf("publish permission requested event: %w", err)
 	}
 
-	if r.broker == nil {
+	if s.broker == nil {
 		result := types.PermissionResult{
 			Request:  request,
 			Decision: types.PermissionDecisionDeny,
 			Reason:   "no permission broker configured",
 		}
-		if _, err := r.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewPermissionDeniedEvent(
 			time.Now().UTC(), result)); err != nil {
 			return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
 		}
 		return false, types.ErrorToolResult(result.Reason), nil
 	}
 
-	result, err := r.broker.Decide(ctx, request)
+	result, err := s.broker.Decide(ctx, request)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			_, _ = r.bus.Publish(ctx, types.NewRunErrorEvent(time.Now().UTC(), err))
+			_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
 		}
 		return false, types.ToolResult{}, fmt.Errorf("decide permission for tool %q: %w",
 			call.Name, err)
@@ -361,7 +374,7 @@ func (r *Run) authorizeToolCall(ctx context.Context, call types.ToolCall,
 
 	switch result.Decision {
 	case types.PermissionDecisionAllow:
-		if _, err := r.bus.Publish(ctx, types.NewPermissionGrantedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewPermissionGrantedEvent(
 			time.Now().UTC(), result)); err != nil {
 			return false, types.ToolResult{}, fmt.Errorf("publish permission granted event: %w", err)
 		}
@@ -370,7 +383,7 @@ func (r *Run) authorizeToolCall(ctx context.Context, call types.ToolCall,
 		if result.Reason == "" {
 			result.Reason = "permission denied"
 		}
-		if _, err := r.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewPermissionDeniedEvent(
 			time.Now().UTC(), result)); err != nil {
 			return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
 		}
@@ -378,7 +391,7 @@ func (r *Run) authorizeToolCall(ctx context.Context, call types.ToolCall,
 	default:
 		result.Decision = types.PermissionDecisionDeny
 		result.Reason = "permission broker returned an invalid decision"
-		if _, err := r.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+		if _, err := s.bus.Publish(ctx, types.NewPermissionDeniedEvent(
 			time.Now().UTC(), result)); err != nil {
 			return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
 		}

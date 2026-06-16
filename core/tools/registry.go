@@ -15,7 +15,7 @@ var (
 	ErrToolNotFound          = errors.New("tool not found")
 )
 
-// Registry stores the tools available to a run.
+// Registry stores the tools available to a session.
 type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool

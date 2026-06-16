@@ -19,10 +19,10 @@ var (
 	ErrEmptyEventKind = errors.New("event kind is empty")
 )
 
-// Bus stamps and broadcasts run events to subscribers.
+// Bus stamps and broadcasts session events to subscribers.
 type Bus struct {
 	mu          sync.RWMutex
-	runID       string
+	sessionID   string
 	bufferSize  int
 	nextSeq     int64
 	nextSubID   uint64
@@ -34,19 +34,19 @@ type Bus struct {
 	history []types.Event
 }
 
-// NewBus returns an event bus for one run.
-func NewBus(runID string, bufferSize int) *Bus {
-	return NewBusWithStore(runID, bufferSize, nil)
+// NewBus returns an event bus for one session.
+func NewBus(sessionID string, bufferSize int) *Bus {
+	return NewBusWithStore(sessionID, bufferSize, nil)
 }
 
-// NewBusWithStore returns an event bus for one run with optional persistence.
-func NewBusWithStore(runID string, bufferSize int, store Store) *Bus {
+// NewBusWithStore returns an event bus for one session with optional persistence.
+func NewBusWithStore(sessionID string, bufferSize int, store Store) *Bus {
 	if bufferSize <= 0 {
 		bufferSize = defaultBufferSize
 	}
 
 	return &Bus{
-		runID:       runID,
+		sessionID:   sessionID,
 		bufferSize:  bufferSize,
 		subscribers: make(map[uint64]chan types.Event),
 		store:       store,
@@ -54,8 +54,8 @@ func NewBusWithStore(runID string, bufferSize int, store Store) *Bus {
 }
 
 // NewBusFromHistory returns an event bus seeded with previously persisted events.
-func NewBusFromHistory(runID string, bufferSize int, store Store, history []types.Event) *Bus {
-	bus := NewBusWithStore(runID, bufferSize, store)
+func NewBusFromHistory(sessionID string, bufferSize int, store Store, history []types.Event) *Bus {
+	bus := NewBusWithStore(sessionID, bufferSize, store)
 	bus.history = make([]types.Event, len(history))
 	copy(bus.history, history)
 
@@ -107,9 +107,9 @@ func (b *Bus) Publish(ctx context.Context, event types.Event) (types.Event, erro
 
 	b.nextSeq++
 	event.Sequence = b.nextSeq
-	event.RunID = b.runID
+	event.SessionID = b.sessionID
 	if event.ID == "" {
-		event.ID = fmt.Sprintf("%s:%d", b.runID, event.Sequence)
+		event.ID = fmt.Sprintf("%s:%d", b.sessionID, event.Sequence)
 	}
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()

@@ -6,8 +6,8 @@ import (
 	"github.com/shxntanu/epsilon/core/types"
 )
 
-// Store persists and loads run events.
+// Store persists and loads session events.
 type Store interface {
 	Append(ctx context.Context, event types.Event) error
-	Load(ctx context.Context, runID string) ([]types.Event, error)
+	Load(ctx context.Context, sessionID string) ([]types.Event, error)
 }

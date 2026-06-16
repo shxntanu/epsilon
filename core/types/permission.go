@@ -26,7 +26,7 @@ const (
 
 // PermissionRequest describes a tool action that may need approval.
 type PermissionRequest struct {
-	RunID      string          `json:"run_id,omitempty"`
+	SessionID  string          `json:"session_id,omitempty"`
 	ToolCallID string          `json:"tool_call_id,omitempty"`
 	ToolName   string          `json:"tool_name"`
 	Input      json.RawMessage `json:"input,omitempty"`

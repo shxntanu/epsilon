@@ -2,7 +2,7 @@ package types
 
 import "encoding/json"
 
-// Role identifies who produced a message in a run.
+// Role identifies who produced a message in a session.
 type Role string
 
 const (

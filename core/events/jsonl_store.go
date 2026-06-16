@@ -15,7 +15,7 @@ import (
 
 const eventsFileName = "events.jsonl"
 
-// JSONLStore stores each run's events as newline-delimited JSON.
+// JSONLStore stores each session's events as newline-delimited JSON.
 type JSONLStore struct {
 	baseDir string
 }
@@ -46,13 +46,13 @@ func (s *JSONLStore) Append(ctx context.Context, event types.Event) error {
 	default:
 	}
 
-	path, err := s.eventsPath(event.RunID)
+	path, err := s.eventsPath(event.SessionID)
 	if err != nil {
 		return err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create run event directory: %w", err)
+		return fmt.Errorf("create session event directory: %w", err)
 	}
 
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -82,9 +82,9 @@ func (s *JSONLStore) Append(ctx context.Context, event types.Event) error {
 	return nil
 }
 
-// Load returns persisted events for a run in append order.
-func (s *JSONLStore) Load(ctx context.Context, runID string) ([]types.Event, error) {
-	path, err := s.eventsPath(runID)
+// Load returns persisted events for a session in append order.
+func (s *JSONLStore) Load(ctx context.Context, sessionID string) ([]types.Event, error) {
+	path, err := s.eventsPath(sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -123,23 +123,23 @@ func (s *JSONLStore) BaseDir() string {
 	return s.baseDir
 }
 
-func (s *JSONLStore) eventsPath(runID string) (string, error) {
-	if err := validateRunID(runID); err != nil {
+func (s *JSONLStore) eventsPath(sessionID string) (string, error) {
+	if err := validateSessionID(sessionID); err != nil {
 		return "", err
 	}
 
-	return filepath.Join(s.baseDir, runID, eventsFileName), nil
+	return filepath.Join(s.baseDir, sessionID, eventsFileName), nil
 }
 
-func validateRunID(runID string) error {
-	if strings.TrimSpace(runID) == "" {
-		return fmt.Errorf("run ID is empty")
+func validateSessionID(sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("session ID is empty")
 	}
-	if runID == "." || runID == ".." {
-		return fmt.Errorf("invalid run ID: %q", runID)
+	if sessionID == "." || sessionID == ".." {
+		return fmt.Errorf("invalid session ID: %q", sessionID)
 	}
-	if filepath.Base(runID) != runID {
-		return fmt.Errorf("run ID must not contain path separators: %q", runID)
+	if filepath.Base(sessionID) != sessionID {
+		return fmt.Errorf("session ID must not contain path separators: %q", sessionID)
 	}
 
 	return nil
