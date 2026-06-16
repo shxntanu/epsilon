@@ -342,6 +342,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "fake tool prompts:")
 	fmt.Fprintln(w, "  tool:echo hello")
 	fmt.Fprintln(w, "  tool:read README.md")
+	fmt.Fprintln(w, "  tool:read README.md 10 20")
 	fmt.Fprintln(w, "  tool:write scratch.txt hello")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "provider flags:")

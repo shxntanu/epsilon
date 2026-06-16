@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/shxntanu/epsilon/core/types"
@@ -57,12 +58,9 @@ func toolMessageFromPrompt(prompt string) (types.Message, error) {
 		}
 		return toolCallMessage("fake_call_echo", "echo", input), nil
 	case "read":
-		path := strings.TrimSpace(rest)
-		input, err := json.Marshal(map[string]string{
-			"path": path,
-		})
+		input, err := readToolInputFromPrompt(rest)
 		if err != nil {
-			return types.Message{}, fmt.Errorf("encode read_file tool input: %w", err)
+			return types.Message{}, err
 		}
 		return toolCallMessage("fake_call_read", "read_file", input), nil
 	case "write":
@@ -82,6 +80,51 @@ func toolMessageFromPrompt(prompt string) (types.Message, error) {
 	default:
 		return types.Message{}, fmt.Errorf("unknown fake tool command: %q", name)
 	}
+}
+
+func readToolInputFromPrompt(prompt string) (json.RawMessage, error) {
+	fields := strings.Fields(strings.TrimSpace(prompt))
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("tool:read requires path")
+	}
+	if len(fields) > 3 {
+		return nil, fmt.Errorf("tool:read accepts path and optional start_line end_line")
+	}
+
+	input := map[string]any{
+		"path": fields[0],
+	}
+	if len(fields) >= 2 {
+		startLine, err := parsePositiveLineNumber(fields[1], "start_line")
+		if err != nil {
+			return nil, err
+		}
+		input["start_line"] = startLine
+	}
+	if len(fields) == 3 {
+		endLine, err := parsePositiveLineNumber(fields[2], "end_line")
+		if err != nil {
+			return nil, err
+		}
+		input["end_line"] = endLine
+	}
+
+	data, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("encode read_file tool input: %w", err)
+	}
+	return data, nil
+}
+
+func parsePositiveLineNumber(value string, name string) (int, error) {
+	line, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("tool:read %s must be a positive integer", name)
+	}
+	if line < 1 {
+		return 0, fmt.Errorf("tool:read %s must be >= 1", name)
+	}
+	return line, nil
 }
 
 func toolCallMessage(id string, name string, input json.RawMessage) types.Message {
