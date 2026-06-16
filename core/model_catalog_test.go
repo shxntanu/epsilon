@@ -21,14 +21,14 @@ func (p catalogProvider) ListModels(context.Context) ([]types.ModelInfo, error) 
 }
 
 func (p catalogProvider) SelectedModel() string {
-	return "model-b"
+	return "openai/model-b"
 }
 
 func TestHarnessListModels(t *testing.T) {
 	harness, err := New(WithProvider(catalogProvider{
 		models: []types.ModelInfo{
 			{ID: "model-a"},
-			{ID: "model-b", MaxInputTokens: 128000},
+			{ID: "model-b", Provider: "openai", ProviderModel: "openai/model-b", MaxInputTokens: 128000},
 		},
 	}))
 	if err != nil {

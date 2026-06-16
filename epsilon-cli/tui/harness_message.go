@@ -23,15 +23,12 @@ func newHarnessMessage(width int, density densityMode, label lipgloss.Style,
 		label:   label,
 		muted:   muted,
 		block: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("235")).
-			Padding(0, 1),
+			Foreground(lipgloss.Color("252")),
 		agentBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")).
 			BorderStyle(lipgloss.ThickBorder()).
 			BorderLeft(true).
 			BorderForeground(lipgloss.Color("103")).
-			Background(lipgloss.Color("235")).
 			PaddingLeft(1),
 	}
 }

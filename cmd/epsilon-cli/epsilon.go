@@ -82,7 +82,7 @@ func runCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	harness, err := newHarness(harnessConfig{
+	harness, err := newHarness(ctx, harnessConfig{
 		sessionDir:     *sessionDir,
 		workspace:      *workspace,
 		provider:       *provider,
@@ -138,7 +138,7 @@ func resumeCommand(ctx context.Context, args []string) error {
 	}
 	sessionID := remaining[0]
 
-	harness, err := newHarness(harnessConfig{
+	harness, err := newHarness(ctx, harnessConfig{
 		sessionDir:     *sessionDir,
 		workspace:      *workspace,
 		provider:       *provider,
@@ -206,7 +206,7 @@ func eventsCommand(ctx context.Context, args []string) error {
 	return nil
 }
 
-func newHarness(config harnessConfig) (*core.Harness, error) {
+func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error) {
 	broker := config.broker
 	if config.allowAll {
 		broker = permissions.NewAllowBroker()
@@ -220,12 +220,47 @@ func newHarness(config harnessConfig) (*core.Harness, error) {
 		return nil, err
 	}
 
-	return core.New(
+	options := []core.Option{
 		core.WithProvider(provider),
 		core.WithDefaultTools(config.workspace),
 		core.WithSessionDir(config.sessionDir),
 		core.WithPermissionBroker(broker),
-	)
+	}
+	if modelInfo, ok := selectedModelInfoForProvider(ctx, provider); ok {
+		options = append(options, core.WithSelectedModelInfo(modelInfo))
+	}
+
+	return core.New(options...)
+}
+
+func selectedModelInfoForProvider(ctx context.Context, provider types.Provider) (types.ModelInfo, bool) {
+	catalog, ok := provider.(types.ModelCatalogProvider)
+	if !ok {
+		return types.ModelInfo{}, false
+	}
+	selected, ok := provider.(types.SelectedModelProvider)
+	if !ok || strings.TrimSpace(selected.SelectedModel()) == "" {
+		return types.ModelInfo{}, false
+	}
+
+	metadataCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	models, err := catalog.ListModels(metadataCtx)
+	if err != nil {
+		return types.ModelInfo{}, false
+	}
+	selectedID := strings.TrimSpace(selected.SelectedModel())
+	for _, model := range models {
+		if model.ID == selectedID || model.Name == selectedID || model.ProviderModel == selectedID ||
+			strings.TrimPrefix(selectedID, model.Provider+"/") == model.ID ||
+			strings.TrimPrefix(selectedID, model.Provider+"/") == model.Name ||
+			strings.TrimPrefix(model.ProviderModel, model.Provider+"/") == selectedID {
+			return model, true
+		}
+	}
+
+	return types.ModelInfo{}, false
 }
 
 func newProvider(config harnessConfig) (types.Provider, error) {

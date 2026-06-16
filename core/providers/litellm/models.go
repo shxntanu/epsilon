@@ -143,12 +143,14 @@ func modelInfoFromEntry(entry modelInfoEntry) types.ModelInfo {
 	id := firstString(entry.ModelName, entry.ModelID, stringValue(info, "id"),
 		stringValue(info, "model_name"), stringValue(params, "model"))
 	name := firstString(entry.ModelName, stringValue(info, "display_name"), id)
-	provider := firstString(stringValue(info, "provider"), providerFromModelName(stringValue(params, "model")))
+	providerModel := stringValue(params, "model")
+	provider := firstString(stringValue(info, "provider"), providerFromModelName(providerModel))
 
 	model := types.ModelInfo{
 		ID:              id,
 		Name:            name,
 		Provider:        provider,
+		ProviderModel:   providerModel,
 		Mode:            stringValue(info, "mode"),
 		MaxInputTokens:  intValue(info, "max_input_tokens", "input_cost_per_token_limit"),
 		MaxOutputTokens: intValue(info, "max_output_tokens"),

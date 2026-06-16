@@ -56,6 +56,9 @@ func TestListModelsUsesModelInfo(t *testing.T) {
 	if model.Provider != "openai" {
 		t.Fatalf("provider = %q, want openai", model.Provider)
 	}
+	if model.ProviderModel != "openai/gpt-4o" {
+		t.Fatalf("provider model = %q, want openai/gpt-4o", model.ProviderModel)
+	}
 	if model.MaxInputTokens != 128000 {
 		t.Fatalf("max input = %d, want 128000", model.MaxInputTokens)
 	}

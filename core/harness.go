@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/shxntanu/epsilon/core/contextwindow"
@@ -26,6 +27,7 @@ type Harness struct {
 	toolRegistry     *tools.Registry
 	slashRegistry    *slash.Registry
 	contextTracker   *contextwindow.Tracker
+	selectedModel    *types.ModelInfo
 	permissionBroker permissions.Broker
 	eventStore       events.Store
 }
@@ -145,6 +147,10 @@ func (h *Harness) ListModels(ctx context.Context) ([]types.ModelInfo, error) {
 }
 
 func (h *Harness) SelectedModelInfo(ctx context.Context) (types.ModelInfo, bool, error) {
+	if h.selectedModel != nil {
+		return *h.selectedModel, true, nil
+	}
+
 	selected, ok := h.provider.(types.SelectedModelProvider)
 	if !ok {
 		return types.ModelInfo{}, false, nil
@@ -157,11 +163,34 @@ func (h *Harness) SelectedModelInfo(ctx context.Context) (types.ModelInfo, bool,
 
 	selectedID := selected.SelectedModel()
 	for _, model := range models {
-		if model.ID == selectedID || model.Name == selectedID {
+		if modelMatchesSelected(model, selectedID) {
 			return model, true, nil
 		}
 	}
 	return types.ModelInfo{}, false, nil
+}
+
+func (h *Harness) CachedSelectedModelInfo() (types.ModelInfo, bool) {
+	if h.selectedModel == nil {
+		return types.ModelInfo{}, false
+	}
+	return *h.selectedModel, true
+}
+
+func modelMatchesSelected(model types.ModelInfo, selected string) bool {
+	selected = strings.TrimSpace(selected)
+	if selected == "" {
+		return false
+	}
+	values := []string{model.ID, model.Name, model.ProviderModel}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == selected || strings.TrimPrefix(value, model.Provider+"/") == selected ||
+			strings.TrimPrefix(selected, model.Provider+"/") == value {
+			return true
+		}
+	}
+	return false
 }
 
 func randomSessionID() (string, error) {

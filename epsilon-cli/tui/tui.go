@@ -50,8 +50,11 @@ func Start(ctx context.Context, config Config) error {
 		}
 		return sess.ContextSummary(nil)
 	}
+	selectedModel := func() (types.ModelInfo, bool) {
+		return config.Harness.CachedSelectedModelInfo()
+	}
 	program := tea.NewProgram(newModel(ctx, sess, sub.Events(), config.PermissionBroker,
-		config.Harness.SlashCommands(), contextSummary),
+		config.Harness.SlashCommands(), contextSummary, selectedModel),
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -89,6 +92,7 @@ type model struct {
 	spinner      spinner.Model
 	viewport     viewport.Model
 	contextView  func() contextwindow.Summary
+	modelInfo    func() (types.ModelInfo, bool)
 	permission   *permissionPrompt
 	entries      []transcriptEntry
 	pendingUsers []string
@@ -162,7 +166,7 @@ func (d densityMode) Label() string {
 
 func newModel(ctx context.Context, sess *session.Session, events <-chan types.Event,
 	broker *PermissionBroker, slashRegistry *slash.Registry,
-	contextSummary func() contextwindow.Summary) model {
+	contextSummary func() contextwindow.Summary, selectedModel func() (types.ModelInfo, bool)) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
 	if slashRegistry == nil {
@@ -171,6 +175,11 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 	if contextSummary == nil {
 		contextSummary = func() contextwindow.Summary {
 			return sess.ContextSummary(nil)
+		}
+	}
+	if selectedModel == nil {
+		selectedModel = func() (types.ModelInfo, bool) {
+			return types.ModelInfo{}, false
 		}
 	}
 
@@ -227,6 +236,7 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 		spinner:     spin,
 		viewport:    vp,
 		contextView: contextSummary,
+		modelInfo:   selectedModel,
 		density:     densityComfortable,
 		status:      "ready",
 		styles:      styles,
@@ -422,7 +432,7 @@ func (m *model) resize() {
 }
 
 func (m model) renderContextWidget() string {
-	return newContextWidget(m.contextView(), m.width).View()
+	return newContextWidget(m.contextView(), m.width, m.selectedModelInfo()).View()
 }
 
 func (m model) renderContextPanel() string {
@@ -430,7 +440,7 @@ func (m model) renderContextPanel() string {
 	if width == 0 {
 		return ""
 	}
-	return newContextPanel(m.contextView(), width, m.viewport.Height()).Panel()
+	return newContextPanel(m.contextView(), width, m.viewport.Height(), m.selectedModelInfo()).Panel()
 }
 
 func (m model) contextPanelWidth() int {
@@ -442,6 +452,17 @@ func (m model) contextPanelWidth() int {
 		return 0
 	}
 	return min(contextPanelMaxWidth, max(contextPanelMinWidth, m.width/3))
+}
+
+func (m model) selectedModelInfo() *types.ModelInfo {
+	if m.modelInfo == nil {
+		return nil
+	}
+	model, ok := m.modelInfo()
+	if !ok {
+		return nil
+	}
+	return &model
 }
 
 func (m *model) toggleDensity() {

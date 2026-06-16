@@ -141,6 +141,7 @@ type ModelInfo struct {
 	ID              string       `json:"id"`
 	Name            string       `json:"name,omitempty"`
 	Provider        string       `json:"provider,omitempty"`
+	ProviderModel   string       `json:"provider_model,omitempty"`
 	Mode            string       `json:"mode,omitempty"`
 	MaxInputTokens  int          `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int          `json:"max_output_tokens,omitempty"`

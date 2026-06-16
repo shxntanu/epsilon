@@ -27,7 +27,7 @@ func tuiCommand(ctx context.Context, args []string) error {
 		permissionBroker = tui.NewPermissionBroker()
 	}
 
-	harness, err := newHarness(harnessConfig{
+	harness, err := newHarness(ctx, harnessConfig{
 		sessionDir:     *sessionDir,
 		workspace:      *workspace,
 		provider:       *provider,

@@ -64,6 +64,15 @@ func WithContextWindowTokens(maxTokens int) Option {
 	}
 }
 
+func WithSelectedModelInfo(model types.ModelInfo) Option {
+	return func(h *Harness) error {
+		h.selectedModel = &model
+		h.contextTracker = contextwindow.NewTracker(
+			contextwindow.ConfigFromModelInfo(model, contextwindow.Config{}))
+		return nil
+	}
+}
+
 func WithEventStore(store events.Store) Option {
 	return func(h *Harness) error {
 		h.eventStore = store

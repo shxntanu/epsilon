@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/shxntanu/epsilon/core/contextwindow"
+	"github.com/shxntanu/epsilon/core/types"
 )
 
 func TestContextWidgetView(t *testing.T) {
@@ -14,7 +15,7 @@ func TestContextWidgetView(t *testing.T) {
 		RemainingTokens:    75,
 		PercentUsed:        0.25,
 		TokensUntilCompact: 60,
-	}, 80).View()
+	}, 80, nil).View()
 
 	for _, want := range []string{"context 25.0%", "25/100 tokens", "60 until compact"} {
 		if !strings.Contains(view, want) {
@@ -24,6 +25,17 @@ func TestContextWidgetView(t *testing.T) {
 }
 
 func TestContextPanelView(t *testing.T) {
+	model := &types.ModelInfo{
+		ID:              "gpt-4o",
+		Provider:        "openai",
+		ProviderModel:   "openai/gpt-4o",
+		MaxInputTokens:  128000,
+		MaxOutputTokens: 16384,
+		Pricing: types.ModelPricing{
+			InputCostPer1KTokens:  0.0025,
+			OutputCostPer1KTokens: 0.01,
+		},
+	}
 	view := newContextPanel(contextwindow.Summary{
 		MaxTokens:          100,
 		UsedTokens:         50,
@@ -38,9 +50,9 @@ func TestContextPanelView(t *testing.T) {
 			{Label: "user", Tokens: 20},
 			{Label: "tool call: read_file", Tokens: 30},
 		},
-	}, 36, 12).Panel()
+	}, 36, 12, model).Panel()
 
-	for _, want := range []string{"Context", "Breakdown", "User messages", "Tool calls", "Recent"} {
+	for _, want := range []string{"Context", "Model", "gpt-4o", "128000", "Breakdown", "User messages", "Tool calls", "Recent"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("context panel missing %q in %q", want, view)
 		}

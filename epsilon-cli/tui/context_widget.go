@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/shxntanu/epsilon/core/contextwindow"
+	"github.com/shxntanu/epsilon/core/types"
 )
 
 const (
@@ -17,20 +18,24 @@ const (
 
 type contextWidget struct {
 	summary contextwindow.Summary
+	model   *types.ModelInfo
 	width   int
 	height  int
 }
 
-func newContextWidget(summary contextwindow.Summary, width int) contextWidget {
+func newContextWidget(summary contextwindow.Summary, width int, model *types.ModelInfo) contextWidget {
 	return contextWidget{
 		summary: summary,
+		model:   model,
 		width:   max(20, width),
 	}
 }
 
-func newContextPanel(summary contextwindow.Summary, width int, height int) contextWidget {
+func newContextPanel(summary contextwindow.Summary, width int, height int,
+	model *types.ModelInfo) contextWidget {
 	return contextWidget{
 		summary: summary,
+		model:   model,
 		width:   max(contextPanelMinWidth, width),
 		height:  max(3, height),
 	}
@@ -63,9 +68,18 @@ func (w contextWidget) Panel() string {
 		fmt.Sprintf("%d tokens left", w.summary.RemainingTokens),
 		fmt.Sprintf("%d until compact", w.summary.TokensUntilCompact),
 		contextBar(w.summary.PercentUsed, innerWidth),
+	}
+
+	if w.model != nil {
+		lines = append(lines, "", lipgloss.NewStyle().
+			Foreground(lipgloss.Color("146")).Bold(true).Render("Model"))
+		lines = append(lines, modelLines(*w.model)...)
+	}
+
+	lines = append(lines,
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color("146")).Bold(true).Render("Breakdown"),
-	}
+	)
 
 	for _, bucket := range w.summary.Buckets {
 		lines = append(lines, bucketLine(bucket, innerWidth))
@@ -92,6 +106,36 @@ func (w contextWidget) Panel() string {
 		Render(body)
 }
 
+func modelLines(model types.ModelInfo) []string {
+	lines := []string{
+		"id: " + model.ID,
+	}
+	if model.Provider != "" {
+		lines = append(lines, "provider: "+model.Provider)
+	}
+	if model.ProviderModel != "" && model.ProviderModel != model.ID {
+		lines = append(lines, "model: "+model.ProviderModel)
+	}
+	if model.MaxInputTokens > 0 {
+		lines = append(lines, fmt.Sprintf("context: %d", model.MaxInputTokens))
+	}
+	if model.MaxOutputTokens > 0 {
+		lines = append(lines, fmt.Sprintf("output: %d", model.MaxOutputTokens))
+	}
+	if price := pricingLine(model.Pricing.InputCostPer1KTokens,
+		model.Pricing.OutputCostPer1KTokens); price != "" {
+		lines = append(lines, price)
+	}
+	return lines
+}
+
+func pricingLine(input float64, output float64) string {
+	if input == 0 && output == 0 {
+		return ""
+	}
+	return fmt.Sprintf("price/1k: $%.4g in / $%.4g out", input, output)
+}
+
 func bucketLine(bucket contextwindow.Bucket, width int) string {
 	labelWidth := min(16, max(10, width/2))
 	label := truncate(bucket.Label, labelWidth)
@@ -115,10 +159,7 @@ func recentSegments(segments []contextwindow.Segment, count int) []contextwindow
 
 func contextBar(percent float64, width int) string {
 	width = max(8, width)
-	fill := int(percent * float64(width))
-	if fill > width {
-		fill = width
-	}
+	fill := min(int(percent*float64(width)), width)
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("146")).Render(strings.Repeat("=", fill)) +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(strings.Repeat("-", width-fill))
 }
