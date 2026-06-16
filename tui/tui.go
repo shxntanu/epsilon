@@ -103,6 +103,11 @@ type styles struct {
 	userBlock  lipgloss.Style
 	agentBlock lipgloss.Style
 	eventBlock lipgloss.Style
+	diffBlock  lipgloss.Style
+	diffHeader lipgloss.Style
+	diffAdd    lipgloss.Style
+	diffRemove lipgloss.Style
+	diffMeta   lipgloss.Style
 	tool       lipgloss.Style
 	error      lipgloss.Style
 	muted      lipgloss.Style
@@ -115,6 +120,7 @@ const (
 	transcriptUser
 	transcriptAgent
 	transcriptEvent
+	transcriptDiff
 )
 
 type transcriptEntry struct {
@@ -171,9 +177,20 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 			Foreground(lipgloss.Color("246")).
 			Background(lipgloss.Color("235")).
 			Padding(0, 1),
-		tool:  lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Bold(true),
-		error: lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
-		muted: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		diffBlock: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Background(lipgloss.Color("234")).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("244")).
+			Padding(0, 1),
+		diffHeader: lipgloss.NewStyle().Foreground(lipgloss.Color("183")).Bold(true),
+		diffAdd:    lipgloss.NewStyle().Foreground(lipgloss.Color("120")),
+		diffRemove: lipgloss.NewStyle().Foreground(lipgloss.Color("210")),
+		diffMeta:   lipgloss.NewStyle().Foreground(lipgloss.Color("246")),
+		tool:       lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Bold(true),
+		error:      lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
+		muted:      lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 	}
 	spin := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
@@ -434,6 +451,9 @@ func (m *model) addEvent(event types.Event) {
 		}
 	case types.EventToolCallCompleted:
 		if event.ToolCall != nil && event.ToolResult != nil {
+			if diff := event.ToolResult.Metadata["diff"]; diff != "" && !event.ToolResult.IsError {
+				m.appendDiff(diff)
+			}
 			line := m.styles.tool.Render("tool completed") + ": " +
 				event.ToolCall.Name + " -> " + textFromContent(event.ToolResult.Content)
 			if metadata := formatMetadata(event.ToolResult.Metadata); metadata != "" {
@@ -479,6 +499,14 @@ func (m *model) appendEvent(line string) {
 	m.entries = append(m.entries, transcriptEntry{
 		kind: transcriptEvent,
 		text: line,
+	})
+	m.dirty = true
+}
+
+func (m *model) appendDiff(diff string) {
+	m.entries = append(m.entries, transcriptEntry{
+		kind: transcriptDiff,
+		text: diff,
 	})
 	m.dirty = true
 }
@@ -607,6 +635,8 @@ func (m model) renderTranscriptEntry(entry transcriptEntry) (string, bool) {
 			return "", false
 		}
 		return m.renderEvent(entry.text), true
+	case transcriptDiff:
+		return m.renderDiff(entry.text), true
 	default:
 		return entry.text, true
 	}
@@ -660,6 +690,42 @@ func (m model) renderEvent(text string) string {
 	return m.styles.eventBlock.Width(m.messageWidth()).Render(text)
 }
 
+func (m model) renderDiff(diff string) string {
+	body := m.renderDiffBody(diff)
+	if m.density == densityCompact {
+		return m.styles.tool.Render("Changes") + "\n" + body
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		m.styles.tool.Render("Changes"),
+		m.styles.diffBlock.Width(m.messageWidth()).Render(body),
+	)
+}
+
+func (m model) renderDiffBody(diff string) string {
+	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
+	rendered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "*** "):
+			rendered = append(rendered, m.styles.diffHeader.Render(line))
+		case strings.HasPrefix(line, "@@"):
+			rendered = append(rendered, m.styles.diffMeta.Render(line))
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+			rendered = append(rendered, m.styles.diffHeader.Render(line))
+		case strings.HasPrefix(line, "+"):
+			rendered = append(rendered, m.styles.diffAdd.Render(line))
+		case strings.HasPrefix(line, "-"):
+			rendered = append(rendered, m.styles.diffRemove.Render(line))
+		default:
+			rendered = append(rendered, m.styles.muted.Render(line))
+		}
+	}
+
+	return strings.Join(rendered, "\n")
+}
+
 func (m model) messageWidth() int {
 	return max(20, m.viewport.Width()-2)
 }
@@ -682,7 +748,17 @@ func formatMetadata(metadata map[string]string) string {
 	if len(metadata) == 0 {
 		return ""
 	}
-	data, err := json.Marshal(metadata)
+	display := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		if key == "diff" {
+			continue
+		}
+		display[key] = value
+	}
+	if len(display) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(display)
 	if err != nil {
 		return ""
 	}

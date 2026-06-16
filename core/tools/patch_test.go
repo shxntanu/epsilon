@@ -74,6 +74,9 @@ func TestPatchToolAppliesAgentUpdatePatch(t *testing.T) {
 	if string(got) != want {
 		t.Fatalf("unexpected content:\nwant %q\n got %q", want, string(got))
 	}
+	if result.Metadata["diff"] == "" {
+		t.Fatalf("expected patch diff metadata")
+	}
 }
 
 func TestPatchToolAppliesAgentAddAndDeletePatch(t *testing.T) {

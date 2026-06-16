@@ -1,16 +1,19 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/shxntanu/epsilon/core/types"
 )
 
 const defaultWriteFileMaxBytes = 512 * 1024
+const defaultWriteFileDiffMaxBytes = 64 * 1024
 
 // WriteFileTool writes UTF-8 text to files inside a workspace.
 type WriteFileTool struct {
@@ -81,12 +84,19 @@ func (t *WriteFileTool) Run(ctx context.Context, input json.RawMessage) (*types.
 		return nil, err
 	}
 
+	var previous []byte
+	existed := false
 	if info, err := os.Stat(path); err == nil {
 		if info.IsDir() {
 			return nil, fmt.Errorf("path is a directory: %s", req.Path)
 		}
 		if !req.Overwrite {
 			return nil, fmt.Errorf("file exists and overwrite is false: %s", req.Path)
+		}
+		existed = true
+		previous, err = os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read existing file: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("stat file: %w", err)
@@ -132,6 +142,52 @@ func (t *WriteFileTool) Run(ctx context.Context, input json.RawMessage) (*types.
 		"bytes":     fmt.Sprintf("%d", len(req.Content)),
 		"workspace": t.workspace.Root(),
 	}
+	if diff := writeFileDiff(req.Path, previous, []byte(req.Content), existed); diff != "" {
+		result.Metadata["diff"] = diff
+	}
 
 	return &result, nil
+}
+
+func writeFileDiff(path string, before []byte, after []byte, existed bool) string {
+	if existed && bytes.Equal(before, after) {
+		return ""
+	}
+
+	var b strings.Builder
+	if existed {
+		fmt.Fprintf(&b, "--- a/%s\n", path)
+	} else {
+		b.WriteString("--- /dev/null\n")
+	}
+	fmt.Fprintf(&b, "+++ b/%s\n@@\n", path)
+	if existed {
+		writeFullFileDiffLines(&b, '-', string(before))
+	}
+	writeFullFileDiffLines(&b, '+', string(after))
+
+	diff := b.String()
+	if len(diff) <= defaultWriteFileDiffMaxBytes {
+		return diff
+	}
+
+	return fmt.Sprintf("--- a/%s\n+++ b/%s\n@@\n%s\n", path, path,
+		"[diff omitted: write_file change is too large to render inline]")
+}
+
+func writeFullFileDiffLines(b *strings.Builder, prefix byte, text string) {
+	if text == "" {
+		return
+	}
+
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	for _, line := range lines {
+		b.WriteByte(prefix)
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	if !strings.HasSuffix(text, "\n") {
+		b.WriteString(`\ No newline at end of file`)
+		b.WriteByte('\n')
+	}
 }

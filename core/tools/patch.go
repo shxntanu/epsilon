@@ -141,6 +141,7 @@ func (t *PatchTool) Run(ctx context.Context, input json.RawMessage) (*types.Tool
 	result.Metadata = map[string]string{
 		"status":         "patched",
 		"modified_files": strings.Join(appliedFiles, ","),
+		"diff":           strings.TrimSpace(args.Patch),
 	}
 
 	return &result, nil
