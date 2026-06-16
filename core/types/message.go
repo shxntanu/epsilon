@@ -112,8 +112,16 @@ func ErrorToolResult(text string) ToolResult {
 
 // ModelRequest is the provider-neutral input sent to an LLM provider.
 type ModelRequest struct {
+	Model    string           `json:"model,omitempty"`
+	Effort   string           `json:"effort,omitempty"`
 	Messages []Message        `json:"messages"`
 	Tools    []ToolDefinition `json:"tools,omitempty"`
+}
+
+// ModelRequestSettings are runtime model options applied to each request.
+type ModelRequestSettings struct {
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 }
 
 // ModelResponse is the provider-neutral output returned by an LLM provider.

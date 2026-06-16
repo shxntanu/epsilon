@@ -71,10 +71,15 @@ func (p *Provider) SelectedModel() string {
 // Respond sends a chat completion request to the LiteLLM proxy.
 func (p *Provider) Respond(ctx context.Context,
 	req types.ModelRequest) (*types.ModelResponse, error) {
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = p.model
+	}
 	payload := chatCompletionRequest{
-		Model:    p.model,
-		Messages: convertMessages(req.Messages),
-		Tools:    convertTools(req.Tools),
+		Model:           model,
+		Messages:        convertMessages(req.Messages),
+		Tools:           convertTools(req.Tools),
+		ReasoningEffort: strings.TrimSpace(req.Effort),
 	}
 
 	body, err := json.Marshal(payload)
@@ -128,10 +133,11 @@ func (p *Provider) Respond(ctx context.Context,
 }
 
 type chatCompletionRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Tools    []chatTool    `json:"tools,omitempty"`
-	Stream   bool          `json:"stream,omitempty"`
+	Model           string        `json:"model"`
+	Messages        []chatMessage `json:"messages"`
+	Tools           []chatTool    `json:"tools,omitempty"`
+	Stream          bool          `json:"stream,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 }
 
 type chatMessage struct {
@@ -190,11 +196,16 @@ type chatStreamDelta struct {
 // StreamRespond sends a streaming chat completion request to the LiteLLM proxy.
 func (p *Provider) StreamRespond(ctx context.Context, req types.ModelRequest,
 	emit func(types.ModelDelta) error) (*types.ModelResponse, error) {
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = p.model
+	}
 	payload := chatCompletionRequest{
-		Model:    p.model,
-		Messages: convertMessages(req.Messages),
-		Tools:    convertTools(req.Tools),
-		Stream:   true,
+		Model:           model,
+		Messages:        convertMessages(req.Messages),
+		Tools:           convertTools(req.Tools),
+		Stream:          true,
+		ReasoningEffort: strings.TrimSpace(req.Effort),
 	}
 
 	body, err := json.Marshal(payload)

@@ -17,6 +17,9 @@ const (
 	ActionClearTranscript Action = "clear_transcript"
 	ActionSetEvents       Action = "set_events"
 	ActionSetDensity      Action = "set_density"
+	ActionPickModel       Action = "pick_model"
+	ActionSetModel        Action = "set_model"
+	ActionSetEffort       Action = "set_effort"
 	ActionQuit            Action = "quit"
 )
 
@@ -50,6 +53,8 @@ type State struct {
 	EventsVisible    bool
 	Density          Density
 	MessageCount     int
+	Model            string
+	Effort           string
 }
 
 type Result struct {
@@ -57,6 +62,8 @@ type Result struct {
 	Message string
 	Bool    bool
 	Density Density
+	Model   string
+	Effort  string
 }
 
 type Registry struct {
@@ -139,6 +146,51 @@ func NewDefaultRegistry() *Registry {
 		},
 	})
 	registry.Register(Command{
+		Name:        "model",
+		Usage:       "/model [name]",
+		Description: "show or change the model",
+		Handler: func(_ context.Context, exec Execution) (Result, error) {
+			model := strings.TrimSpace(exec.Args)
+			if model == "" {
+				return Result{Action: ActionPickModel}, nil
+			}
+			return Result{
+				Action:  ActionSetModel,
+				Model:   model,
+				Message: "model " + model,
+			}, nil
+		},
+	})
+	registry.Register(Command{
+		Name:        "effort",
+		Usage:       "/effort [minimal|low|medium|high|off]",
+		Description: "show or change model effort",
+		Handler: func(_ context.Context, exec Execution) (Result, error) {
+			effort := strings.ToLower(strings.TrimSpace(exec.Args))
+			if effort == "" {
+				current := strings.TrimSpace(exec.State.Effort)
+				if current == "" {
+					current = "default"
+				}
+				return Result{Message: "effort " + current}, nil
+			}
+			if effort == "default" || effort == "none" || effort == "off" {
+				return Result{
+					Action:  ActionSetEffort,
+					Message: "effort default",
+				}, nil
+			}
+			if !validEffort(effort) {
+				return Result{}, fmt.Errorf("effort must be minimal, low, medium, high, or off")
+			}
+			return Result{
+				Action:  ActionSetEffort,
+				Effort:  effort,
+				Message: "effort " + effort,
+			}, nil
+		},
+	})
+	registry.Register(Command{
 		Name:        "status",
 		Usage:       "/status",
 		Description: "show session and runtime state",
@@ -157,6 +209,15 @@ func NewDefaultRegistry() *Registry {
 	})
 
 	return registry
+}
+
+func validEffort(effort string) bool {
+	switch effort {
+	case "minimal", "low", "medium", "high":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Registry) Register(command Command) {
@@ -384,12 +445,23 @@ func renderStatus(exec Execution) string {
 		state = "approval"
 	}
 
+	model := exec.State.Model
+	if strings.TrimSpace(model) == "" {
+		model = "default"
+	}
+	effort := exec.State.Effort
+	if strings.TrimSpace(effort) == "" {
+		effort = "default"
+	}
+
 	return strings.Join([]string{
 		"Status",
 		"session: " + exec.SessionID,
 		"state: " + state,
 		"events: " + onOff(exec.State.EventsVisible),
 		"density: " + string(exec.State.Density),
+		"model: " + model,
+		"effort: " + effort,
 		fmt.Sprintf("messages: %d", exec.State.MessageCount),
 	}, "\n")
 }

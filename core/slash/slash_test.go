@@ -110,6 +110,42 @@ func TestDefaultRegistryActions(t *testing.T) {
 	if !handled || result.Action != ActionSetDensity || result.Density != DensityCompact {
 		t.Fatalf("density result = %#v, handled %v", result, handled)
 	}
+
+	result, handled, err = registry.Execute(context.Background(), "/model",
+		Execution{State: State{Model: "gpt-5.4"}})
+	if err != nil {
+		t.Fatalf("execute model picker: %v", err)
+	}
+	if !handled || result.Action != ActionPickModel {
+		t.Fatalf("model picker result = %#v, handled %v", result, handled)
+	}
+
+	result, handled, err = registry.Execute(context.Background(), "/model gpt-4o",
+		Execution{State: State{Model: "gpt-5.4"}})
+	if err != nil {
+		t.Fatalf("execute model: %v", err)
+	}
+	if !handled || result.Action != ActionSetModel || result.Model != "gpt-4o" {
+		t.Fatalf("model result = %#v, handled %v", result, handled)
+	}
+
+	result, handled, err = registry.Execute(context.Background(), "/effort high",
+		Execution{State: State{Effort: "medium"}})
+	if err != nil {
+		t.Fatalf("execute effort: %v", err)
+	}
+	if !handled || result.Action != ActionSetEffort || result.Effort != "high" {
+		t.Fatalf("effort result = %#v, handled %v", result, handled)
+	}
+
+	result, handled, err = registry.Execute(context.Background(), "/effort off",
+		Execution{State: State{Effort: "high"}})
+	if err != nil {
+		t.Fatalf("execute effort off: %v", err)
+	}
+	if !handled || result.Action != ActionSetEffort || result.Effort != "" {
+		t.Fatalf("effort off result = %#v, handled %v", result, handled)
+	}
 }
 
 func TestUnknownCommand(t *testing.T) {

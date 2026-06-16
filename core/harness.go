@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	harnessconfig "github.com/shxntanu/epsilon/core/config"
 	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
@@ -28,8 +29,12 @@ type Harness struct {
 	slashRegistry    *slash.Registry
 	contextTracker   *contextwindow.Tracker
 	selectedModel    *types.ModelInfo
+	model            string
+	effort           string
 	permissionBroker permissions.Broker
 	eventStore       events.Store
+	configStore      *harnessconfig.Store
+	configSettings   harnessconfig.Settings
 }
 
 const defaultEventBufferSize = 64
@@ -59,6 +64,11 @@ func New(opts ...Option) (*Harness, error) {
 	if h.newSessionID == nil {
 		return nil, fmt.Errorf("session ID generator is nil")
 	}
+	if h.model == "" {
+		if selected, ok := h.provider.(types.SelectedModelProvider); ok {
+			h.model = strings.TrimSpace(selected.SelectedModel())
+		}
+	}
 
 	return h, nil
 }
@@ -69,7 +79,7 @@ func (h *Harness) StartSession(ctx context.Context) (*session.Session, error) {
 		return nil, fmt.Errorf("create session ID: %w", err)
 	}
 
-	sess := session.New(id, h.eventBufferSize, h.provider, h.toolRegistry,
+	sess := session.New(id, h.eventBufferSize, h.provider, h.modelRequestSettings, h.toolRegistry,
 		h.permissionBroker, h.eventStore)
 
 	h.mu.Lock()
@@ -103,7 +113,8 @@ func (h *Harness) ResumeSession(ctx context.Context, sessionID string) (*session
 		return nil, fmt.Errorf("session %q has no persisted events", sessionID)
 	}
 
-	sess := session.FromHistory(sessionID, h.eventBufferSize, h.provider, h.toolRegistry,
+	sess := session.FromHistory(sessionID, h.eventBufferSize, h.provider,
+		h.modelRequestSettings, h.toolRegistry,
 		h.permissionBroker, h.eventStore, history)
 
 	h.mu.Lock()
@@ -151,17 +162,12 @@ func (h *Harness) SelectedModelInfo(ctx context.Context) (types.ModelInfo, bool,
 		return *h.selectedModel, true, nil
 	}
 
-	selected, ok := h.provider.(types.SelectedModelProvider)
-	if !ok {
-		return types.ModelInfo{}, false, nil
-	}
-
 	models, err := h.ListModels(ctx)
 	if err != nil {
 		return types.ModelInfo{}, false, err
 	}
 
-	selectedID := selected.SelectedModel()
+	selectedID := h.CurrentModel()
 	for _, model := range models {
 		if modelMatchesSelected(model, selectedID) {
 			return model, true, nil
@@ -175,6 +181,80 @@ func (h *Harness) CachedSelectedModelInfo() (types.ModelInfo, bool) {
 		return types.ModelInfo{}, false
 	}
 	return *h.selectedModel, true
+}
+
+func (h *Harness) CurrentModel() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.model
+}
+
+func (h *Harness) CurrentEffort() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.effort
+}
+
+func (h *Harness) SetModel(ctx context.Context, model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("model cannot be empty")
+	}
+
+	h.mu.Lock()
+	h.model = model
+	h.selectedModel = nil
+	h.configSettings.Model = model
+	h.mu.Unlock()
+
+	h.refreshSelectedModel(ctx)
+	return h.saveSessionDefaults()
+}
+
+func (h *Harness) SetEffort(effort string) error {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "default" || effort == "none" || effort == "off" {
+		effort = ""
+	}
+
+	h.mu.Lock()
+	h.effort = effort
+	h.configSettings.Effort = effort
+	h.mu.Unlock()
+
+	return h.saveSessionDefaults()
+}
+
+func (h *Harness) modelRequestSettings() types.ModelRequestSettings {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return types.ModelRequestSettings{
+		Model:  h.model,
+		Effort: h.effort,
+	}
+}
+
+func (h *Harness) refreshSelectedModel(ctx context.Context) {
+	modelInfo, ok, err := h.SelectedModelInfo(ctx)
+	if err != nil || !ok {
+		return
+	}
+	h.mu.Lock()
+	h.selectedModel = &modelInfo
+	h.contextTracker = contextwindow.NewTracker(
+		contextwindow.ConfigFromModelInfo(modelInfo, contextwindow.Config{}))
+	h.mu.Unlock()
+}
+
+func (h *Harness) saveSessionDefaults() error {
+	h.mu.Lock()
+	store := h.configStore
+	settings := h.configSettings
+	h.mu.Unlock()
+	if store == nil {
+		return nil
+	}
+	return store.SaveSessionDefaults(settings)
 }
 
 func modelMatchesSelected(model types.ModelInfo, selected string) bool {

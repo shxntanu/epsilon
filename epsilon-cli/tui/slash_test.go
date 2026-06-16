@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/shxntanu/epsilon/core/slash"
+	"github.com/shxntanu/epsilon/core/types"
 )
 
 func TestSlashSelectorQuery(t *testing.T) {
@@ -58,5 +59,26 @@ func TestDensityModeFromSlash(t *testing.T) {
 	}
 	if got := slashDensity(densityComfortable); got != slash.DensityComfortable {
 		t.Fatalf("comfortable density = %v, want comfortable", got)
+	}
+}
+
+func TestModelPickerSelectsCurrentModel(t *testing.T) {
+	models := []types.ModelInfo{
+		{ID: "gpt-4o"},
+		{ID: "gpt-5.4", Provider: "openai", ProviderModel: "openai/gpt-5.4"},
+	}
+
+	if got := selectedModelCursor(models, "openai/gpt-5.4"); got != 1 {
+		t.Fatalf("cursor = %d, want current model index", got)
+	}
+	if got := modelSelectionID(models[1]); got != "gpt-5.4" {
+		t.Fatalf("selection id = %q, want gpt-5.4", got)
+	}
+}
+
+func TestModelWindowKeepsCursorVisible(t *testing.T) {
+	start, end := modelWindow(9, 12, 5)
+	if start != 7 || end != 12 {
+		t.Fatalf("window = %d:%d, want 7:12", start, end)
 	}
 }

@@ -3,9 +3,12 @@ package litellm
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
+
+	"github.com/shxntanu/epsilon/core/types"
 )
 
 func TestListModelsUsesModelInfo(t *testing.T) {
@@ -103,6 +106,47 @@ func TestListModelsFallsBackToOpenAIModels(t *testing.T) {
 	}
 	if models[0].MaxInputTokens != 0 {
 		t.Fatalf("fallback max input = %d, want 0", models[0].MaxInputTokens)
+	}
+}
+
+func TestRespondUsesRequestModelAndEffort(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %s, want /chat/completions", r.URL.Path)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if payload["model"] != "gpt-4o" {
+			t.Fatalf("model = %v, want gpt-4o", payload["model"])
+		}
+		if payload["reasoning_effort"] != "high" {
+			t.Fatalf("reasoning_effort = %v, want high", payload["reasoning_effort"])
+		}
+
+		return jsonResponse(http.StatusOK, `{
+			"choices": [{"message": {"role": "assistant", "content": "ok"}}]
+		}`), nil
+	})}
+
+	provider, err := New(Config{
+		BaseURL:    "http://litellm.test",
+		Model:      "default-model",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	_, err = provider.Respond(context.Background(), types.ModelRequest{
+		Model:    "gpt-4o",
+		Effort:   "high",
+		Messages: []types.Message{types.UserMessage("hello")},
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
 	}
 }
 

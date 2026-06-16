@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 
+	harnessconfig "github.com/shxntanu/epsilon/core/config"
 	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
@@ -67,8 +68,27 @@ func WithContextWindowTokens(maxTokens int) Option {
 func WithSelectedModelInfo(model types.ModelInfo) Option {
 	return func(h *Harness) error {
 		h.selectedModel = &model
+		if h.model == "" {
+			h.model = model.ID
+		}
 		h.contextTracker = contextwindow.NewTracker(
 			contextwindow.ConfigFromModelInfo(model, contextwindow.Config{}))
+		return nil
+	}
+}
+
+func WithRuntimeSettings(settings harnessconfig.Settings) Option {
+	return func(h *Harness) error {
+		h.configSettings = settings
+		h.model = settings.Model
+		h.effort = settings.Effort
+		return nil
+	}
+}
+
+func WithConfigStore(store *harnessconfig.Store) Option {
+	return func(h *Harness) error {
+		h.configStore = store
 		return nil
 	}
 }

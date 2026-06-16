@@ -23,6 +23,7 @@ func tuiCommand(ctx context.Context, args []string) error {
 	allowAll := fs.Bool("y", false, "allow permission requests without prompting")
 	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
 	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
+	effort := fs.String("effort", envOrDefault("EPSILON_MODEL_EFFORT", defaults.Effort), "model reasoning effort")
 	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
 	litellmAPIKey := fs.String("litellm-api-key", envOrDefault("LITELLM_API_KEY", ""), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
@@ -39,6 +40,7 @@ func tuiCommand(ctx context.Context, args []string) error {
 		workspace:       *workspace,
 		provider:        *provider,
 		model:           *model,
+		effort:          *effort,
 		litellmBaseURL:  *litellmBaseURL,
 		litellmAPIKey:   *litellmAPIKey,
 		eventBufferSize: defaults.EventBufferSize,

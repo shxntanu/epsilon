@@ -25,6 +25,7 @@ type harnessConfig struct {
 	workspace       string
 	provider        string
 	model           string
+	effort          string
 	litellmBaseURL  string
 	litellmAPIKey   string
 	eventBufferSize int
@@ -78,6 +79,7 @@ func runCommand(ctx context.Context, args []string) error {
 	allowAll := fs.Bool("y", false, "allow permission requests without prompting")
 	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
 	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
+	effort := fs.String("effort", envOrDefault("EPSILON_MODEL_EFFORT", defaults.Effort), "model reasoning effort")
 	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
 	litellmAPIKey := fs.String("litellm-api-key", os.Getenv("LITELLM_API_KEY"), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
@@ -94,6 +96,7 @@ func runCommand(ctx context.Context, args []string) error {
 		workspace:       *workspace,
 		provider:        *provider,
 		model:           *model,
+		effort:          *effort,
 		litellmBaseURL:  *litellmBaseURL,
 		litellmAPIKey:   *litellmAPIKey,
 		eventBufferSize: defaults.EventBufferSize,
@@ -141,6 +144,7 @@ func resumeCommand(ctx context.Context, args []string) error {
 	allowAll := fs.Bool("y", false, "allow permission requests without prompting")
 	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
 	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
+	effort := fs.String("effort", envOrDefault("EPSILON_MODEL_EFFORT", defaults.Effort), "model reasoning effort")
 	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
 	litellmAPIKey := fs.String("litellm-api-key", os.Getenv("LITELLM_API_KEY"), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
@@ -158,6 +162,7 @@ func resumeCommand(ctx context.Context, args []string) error {
 		workspace:       *workspace,
 		provider:        *provider,
 		model:           *model,
+		effort:          *effort,
 		litellmBaseURL:  *litellmBaseURL,
 		litellmAPIKey:   *litellmAPIKey,
 		eventBufferSize: defaults.EventBufferSize,
@@ -245,6 +250,16 @@ func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error
 
 	options := []core.Option{
 		core.WithProvider(provider),
+		core.WithConfigStore(config.configStore),
+		core.WithRuntimeSettings(harnessconfig.Settings{
+			SessionDir:      config.sessionDir,
+			Workspace:       config.workspace,
+			Provider:        config.provider,
+			Model:           config.model,
+			Effort:          config.effort,
+			LiteLLMBaseURL:  config.litellmBaseURL,
+			EventBufferSize: config.eventBufferSize,
+		}),
 		core.WithDefaultTools(config.workspace),
 		core.WithSessionDir(config.sessionDir),
 		core.WithPermissionBroker(broker),
@@ -267,6 +282,7 @@ func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error
 			Workspace:       config.workspace,
 			Provider:        config.provider,
 			Model:           config.model,
+			Effort:          config.effort,
 			LiteLLMBaseURL:  config.litellmBaseURL,
 			EventBufferSize: config.eventBufferSize,
 		}); err != nil {
@@ -461,6 +477,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  -litellm-base-url http://localhost:4000")
 	fmt.Fprintln(w, "  -litellm-api-key <key>")
 	fmt.Fprintln(w, "  -model <model>")
+	fmt.Fprintln(w, "  -effort <effort>")
 	fmt.Fprintln(w, "  -config .epsilon/config.json")
 }
 

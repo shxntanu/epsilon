@@ -31,5 +31,7 @@ matches and tab to complete the highlighted command.
 - `/clear` - clear the visible transcript
 - `/events [on|off|toggle]` - show or hide event entries
 - `/density [comfortable|compact|toggle]` - switch transcript density
+- `/model [name]` - pick or change the model
+- `/effort [minimal|low|medium|high|off]` - show or change model effort
 - `/status` - show session and TUI state
 - `/quit` - quit epsilon

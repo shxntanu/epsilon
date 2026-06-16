@@ -23,40 +23,45 @@ var (
 const defaultMaxAgentTurns = 20
 
 type Session struct {
-	id       string
-	bus      *events.Bus
-	provider types.Provider
-	tools    *tools.Registry
-	broker   permissions.Broker
-	mu       sync.Mutex
-	closed   bool
-	messages []types.Message
+	id              string
+	bus             *events.Bus
+	provider        types.Provider
+	requestSettings func() types.ModelRequestSettings
+	tools           *tools.Registry
+	broker          permissions.Broker
+	mu              sync.Mutex
+	closed          bool
+	messages        []types.Message
 }
 
 // New returns a session ready to accept messages.
-func New(id string, eventBufferSize int, provider types.Provider, toolRegistry *tools.Registry,
+func New(id string, eventBufferSize int, provider types.Provider,
+	requestSettings func() types.ModelRequestSettings, toolRegistry *tools.Registry,
 	broker permissions.Broker, eventStore events.Store) *Session {
 	return &Session{
-		id:       id,
-		bus:      events.NewBusWithStore(id, eventBufferSize, eventStore),
-		provider: provider,
-		tools:    toolRegistry,
-		broker:   broker,
+		id:              id,
+		bus:             events.NewBusWithStore(id, eventBufferSize, eventStore),
+		provider:        provider,
+		requestSettings: requestSettings,
+		tools:           toolRegistry,
+		broker:          broker,
 	}
 }
 
 // FromHistory returns a session restored from persisted events.
 func FromHistory(id string, eventBufferSize int, provider types.Provider,
+	requestSettings func() types.ModelRequestSettings,
 	toolRegistry *tools.Registry, broker permissions.Broker, eventStore events.Store,
 	history []types.Event) *Session {
 	return &Session{
-		id:       id,
-		bus:      events.NewBusFromHistory(id, eventBufferSize, eventStore, history),
-		provider: provider,
-		tools:    toolRegistry,
-		broker:   broker,
-		closed:   eventHistoryClosed(history),
-		messages: messagesFromEvents(history),
+		id:              id,
+		bus:             events.NewBusFromHistory(id, eventBufferSize, eventStore, history),
+		provider:        provider,
+		requestSettings: requestSettings,
+		tools:           toolRegistry,
+		broker:          broker,
+		closed:          eventHistoryClosed(history),
+		messages:        messagesFromEvents(history),
 	}
 }
 
@@ -195,7 +200,10 @@ func (s *Session) Step(ctx context.Context) error {
 			return fmt.Errorf("publish model started event: %w", err)
 		}
 
+		requestSettings := s.currentRequestSettings()
 		resp, err := s.respond(ctx, provider, types.ModelRequest{
+			Model:    requestSettings.Model,
+			Effort:   requestSettings.Effort,
 			Messages: messages,
 			Tools:    toolDefs,
 		})
@@ -232,6 +240,13 @@ func (s *Session) Step(ctx context.Context) error {
 		defaultMaxAgentTurns)
 	_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
 	return err
+}
+
+func (s *Session) currentRequestSettings() types.ModelRequestSettings {
+	if s.requestSettings == nil {
+		return types.ModelRequestSettings{}
+	}
+	return s.requestSettings()
 }
 
 func (s *Session) modelRequestState() ([]types.Message, types.Provider, *tools.Registry, error) {

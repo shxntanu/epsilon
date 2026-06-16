@@ -54,7 +54,10 @@ func Start(ctx context.Context, config Config) error {
 		return config.Harness.CachedSelectedModelInfo()
 	}
 	program := tea.NewProgram(newModel(ctx, sess, sub.Events(), config.PermissionBroker,
-		config.Harness.SlashCommands(), contextSummary, selectedModel),
+		config.Harness.SlashCommands(), contextSummary, selectedModel,
+		config.Harness.ListModels,
+		config.Harness.CurrentModel, config.Harness.CurrentEffort,
+		config.Harness.SetModel, config.Harness.SetEffort),
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -79,36 +82,46 @@ type eventStreamClosedMsg struct{}
 type stepDoneMsg struct {
 	err error
 }
+type modelListMsg struct {
+	models []types.ModelInfo
+	err    error
+}
 
 const bottomGutterHeight = 1
 
 type model struct {
-	ctx          context.Context
-	session      *session.Session
-	events       <-chan types.Event
-	chatBox      chatBox
-	slash        *slash.Registry
-	slashCursor  int
-	spinner      spinner.Model
-	viewport     viewport.Model
-	contextView  func() contextwindow.Summary
-	modelInfo    func() (types.ModelInfo, bool)
-	permission   *permissionPrompt
-	entries      []transcriptEntry
-	pendingUsers []string
-	dirty        bool
-	followOutput bool
-	width        int
-	height       int
-	busy         bool
-	showSpinner  bool
-	showEvents   bool
-	showContext  bool
-	density      densityMode
-	status       string
-	styles       styles
-	broker       *PermissionBroker
-	streaming    int
+	ctx           context.Context
+	session       *session.Session
+	events        <-chan types.Event
+	chatBox       chatBox
+	slash         *slash.Registry
+	slashCursor   int
+	spinner       spinner.Model
+	viewport      viewport.Model
+	contextView   func() contextwindow.Summary
+	modelInfo     func() (types.ModelInfo, bool)
+	listModels    func(context.Context) ([]types.ModelInfo, error)
+	currentModel  func() string
+	currentEffort func() string
+	setModel      func(context.Context, string) error
+	setEffort     func(string) error
+	modelPicker   *modelPicker
+	permission    *permissionPrompt
+	entries       []transcriptEntry
+	pendingUsers  []string
+	dirty         bool
+	followOutput  bool
+	width         int
+	height        int
+	busy          bool
+	showSpinner   bool
+	showEvents    bool
+	showContext   bool
+	density       densityMode
+	status        string
+	styles        styles
+	broker        *PermissionBroker
+	streaming     int
 }
 
 type styles struct {
@@ -166,7 +179,10 @@ func (d densityMode) Label() string {
 
 func newModel(ctx context.Context, sess *session.Session, events <-chan types.Event,
 	broker *PermissionBroker, slashRegistry *slash.Registry,
-	contextSummary func() contextwindow.Summary, selectedModel func() (types.ModelInfo, bool)) model {
+	contextSummary func() contextwindow.Summary, selectedModel func() (types.ModelInfo, bool),
+	listModels func(context.Context) ([]types.ModelInfo, error),
+	currentModel func() string, currentEffort func() string,
+	setModel func(context.Context, string) error, setEffort func(string) error) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
 	if slashRegistry == nil {
@@ -228,20 +244,25 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 	)
 
 	return model{
-		ctx:         ctx,
-		session:     sess,
-		events:      events,
-		chatBox:     newChatBox(),
-		slash:       slashRegistry,
-		spinner:     spin,
-		viewport:    vp,
-		contextView: contextSummary,
-		modelInfo:   selectedModel,
-		density:     densityComfortable,
-		status:      "ready",
-		styles:      styles,
-		broker:      broker,
-		streaming:   -1,
+		ctx:           ctx,
+		session:       sess,
+		events:        events,
+		chatBox:       newChatBox(),
+		slash:         slashRegistry,
+		spinner:       spin,
+		viewport:      vp,
+		contextView:   contextSummary,
+		modelInfo:     selectedModel,
+		listModels:    listModels,
+		currentModel:  currentModel,
+		currentEffort: currentEffort,
+		setModel:      setModel,
+		setEffort:     setEffort,
+		density:       densityComfortable,
+		status:        "ready",
+		styles:        styles,
+		broker:        broker,
+		streaming:     -1,
 		entries: []transcriptEntry{
 			{kind: transcriptEvent, text: styles.muted.Render("Started session " + sess.ID())},
 		},
@@ -265,6 +286,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if m.permission != nil {
 			cmd := m.updatePermissionPrompt(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.syncViewport()
+			return m, tea.Batch(cmds...)
+		}
+		if m.modelPicker != nil {
+			cmd := m.updateModelPicker(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -344,6 +373,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.waitForEvent())
 	case eventStreamClosedMsg:
 		m.status = "event stream closed"
+	case modelListMsg:
+		m.applyModelList(msg)
 	case spinner.TickMsg:
 		if m.showSpinner {
 			var cmd tea.Cmd
@@ -401,6 +432,9 @@ func (m model) View() tea.View {
 	if selector, ok := m.renderSlashSelector(); ok {
 		parts = append(parts, selector)
 	}
+	if picker, ok := m.renderModelPicker(); ok {
+		parts = append(parts, picker)
+	}
 	parts = append(parts, m.chatBox.View(), contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
@@ -422,8 +456,9 @@ func (m *model) resize() {
 		permissionHeight = 6
 	}
 	selectorHeight := m.slashSelectorHeight()
+	modelPickerHeight := m.modelPickerHeight()
 	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-
-		permissionHeight-selectorHeight-bottomGutterHeight)
+		permissionHeight-selectorHeight-modelPickerHeight-bottomGutterHeight)
 	viewportWidth := max(20, m.width-m.contextPanelWidth())
 
 	m.viewport.SetWidth(viewportWidth)

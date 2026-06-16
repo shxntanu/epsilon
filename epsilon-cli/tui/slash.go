@@ -45,6 +45,38 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		m.resize()
 		m.status = "density:" + m.density.Label()
 		m.appendSlashMessage(result.Message)
+	case slash.ActionPickModel:
+		return m.openModelPicker()
+	case slash.ActionSetModel:
+		if m.setModel == nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render("model changes are not available"))
+			return nil
+		}
+		if err := m.setModel(m.ctx, result.Model); err != nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render(err.Error()))
+			return nil
+		}
+		m.status = "model:" + result.Model
+		m.appendSlashMessage(result.Message)
+	case slash.ActionSetEffort:
+		if m.setEffort == nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render("effort changes are not available"))
+			return nil
+		}
+		if err := m.setEffort(result.Effort); err != nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render(err.Error()))
+			return nil
+		}
+		statusEffort := result.Effort
+		if statusEffort == "" {
+			statusEffort = "default"
+		}
+		m.status = "effort:" + statusEffort
+		m.appendSlashMessage(result.Message)
 	case slash.ActionQuit:
 		return quitCmd()
 	default:
@@ -72,8 +104,17 @@ func (m model) slashExecution() slash.Execution {
 			EventsVisible:    m.showEvents,
 			Density:          slashDensity(m.density),
 			MessageCount:     len(m.session.Messages()),
+			Model:            currentString(m.currentModel),
+			Effort:           currentString(m.currentEffort),
 		},
 	}
+}
+
+func currentString(fn func() string) string {
+	if fn == nil {
+		return ""
+	}
+	return fn()
 }
 
 func slashDensity(density densityMode) slash.Density {
