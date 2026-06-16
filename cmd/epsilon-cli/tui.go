@@ -5,7 +5,7 @@ import (
 	"flag"
 	"io"
 
-	"github.com/shxntanu/epsilon/tui"
+	"github.com/shxntanu/epsilon/epsilon-cli/tui"
 )
 
 func tuiCommand(ctx context.Context, args []string) error {
