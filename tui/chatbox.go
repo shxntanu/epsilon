@@ -8,7 +8,10 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-const chatBoxInputHeight = 4
+const (
+	compactChatBoxInputHeight     = 3
+	comfortableChatBoxInputHeight = 5
+)
 
 type chatBox struct {
 	input textarea.Model
@@ -22,7 +25,7 @@ func newChatBox() chatBox {
 	input.Prompt = ""
 	input.ShowLineNumbers = false
 	input.EndOfBufferCharacter = ' '
-	input.SetHeight(chatBoxInputHeight)
+	input.SetHeight(comfortableChatBoxInputHeight)
 	input.Focus()
 
 	return chatBox{
@@ -61,8 +64,16 @@ func (c *chatBox) SetWidth(width int) {
 	c.input.SetWidth(max(20, width-8))
 }
 
+func (c *chatBox) SetDensity(density densityMode) {
+	height := comfortableChatBoxInputHeight
+	if density == densityCompact {
+		height = compactChatBoxInputHeight
+	}
+	c.input.SetHeight(height)
+}
+
 func (c chatBox) Height() int {
-	return chatBoxInputHeight + 2
+	return c.input.Height() + 2
 }
 
 func (c *chatBox) Submit() (string, bool) {
