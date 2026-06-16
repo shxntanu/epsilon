@@ -16,7 +16,7 @@ export LITELLM_API_KEY=your_api_key
 Then run:
 
 ```sh
-go run ./cmd tui
+go run ./cmd/epsilon-cli/ tui
 ```
 
 ## TUI slash commands
