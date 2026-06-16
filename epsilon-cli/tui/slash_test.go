@@ -3,6 +3,7 @@ package tui
 import (
 	"testing"
 
+	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
 )
@@ -104,6 +105,30 @@ func TestFormatModelRowOmitsMetadata(t *testing.T) {
 
 	if row != "GPT 5.4" {
 		t.Fatalf("row = %q, want display name only", row)
+	}
+}
+
+func TestSessionPickerFiltersFuzzily(t *testing.T) {
+	picker := sessionPicker{
+		sessions: []events.SessionInfo{
+			{ID: "session_alpha"},
+			{ID: "session_beta"},
+			{ID: "worktree_fix"},
+		},
+		query: "wfx",
+	}
+	picker.filter("")
+
+	visible := picker.visibleSessions()
+	if len(visible) != 1 || visible[0].ID != "worktree_fix" {
+		t.Fatalf("visible = %#v, want only worktree_fix", visible)
+	}
+}
+
+func TestFormatSessionRowMarksCurrent(t *testing.T) {
+	row := formatSessionRow(events.SessionInfo{ID: "session_123"}, "session_123", 80)
+	if row != "session_123  current" {
+		t.Fatalf("row = %q, want current marker", row)
 	}
 }
 

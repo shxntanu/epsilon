@@ -47,6 +47,8 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		m.appendSlashMessage(result.Message)
 	case slash.ActionPickModel:
 		return m.openModelPicker()
+	case slash.ActionPickSession:
+		return m.openSessionPicker()
 	case slash.ActionSetModel:
 		if m.setModel == nil {
 			m.status = "ready"
@@ -77,6 +79,8 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		}
 		m.status = "effort:" + statusEffort
 		m.appendSlashMessage(result.Message)
+	case slash.ActionResumeChat:
+		return m.resumeChat(result.Session)
 	case slash.ActionQuit:
 		return quitCmd()
 	default:

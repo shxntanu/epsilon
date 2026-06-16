@@ -20,6 +20,8 @@ const (
 	ActionPickModel       Action = "pick_model"
 	ActionSetModel        Action = "set_model"
 	ActionSetEffort       Action = "set_effort"
+	ActionPickSession     Action = "pick_session"
+	ActionResumeChat      Action = "resume_chat"
 	ActionQuit            Action = "quit"
 )
 
@@ -64,6 +66,7 @@ type Result struct {
 	Density Density
 	Model   string
 	Effort  string
+	Session string
 }
 
 type Registry struct {
@@ -187,6 +190,22 @@ func NewDefaultRegistry() *Registry {
 				Action:  ActionSetEffort,
 				Effort:  effort,
 				Message: "effort " + effort,
+			}, nil
+		},
+	})
+	registry.Register(Command{
+		Name:        "resume",
+		Usage:       "/resume [session-id]",
+		Description: "resume a persisted chat",
+		Handler: func(_ context.Context, exec Execution) (Result, error) {
+			sessionID := strings.TrimSpace(exec.Args)
+			if sessionID == "" {
+				return Result{Action: ActionPickSession}, nil
+			}
+			return Result{
+				Action:  ActionResumeChat,
+				Session: sessionID,
+				Message: "resuming " + sessionID,
 			}, nil
 		},
 	})

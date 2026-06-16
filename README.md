@@ -33,5 +33,6 @@ matches and tab to complete the highlighted command.
 - `/density [comfortable|compact|toggle]` - switch transcript density
 - `/model [name]` - pick or change the model
 - `/effort [minimal|low|medium|high|off]` - show or change model effort
+- `/resume [session-id]` - pick or resume a persisted chat
 - `/status` - show session and TUI state
 - `/quit` - quit epsilon

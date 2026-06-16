@@ -15,6 +15,7 @@ import (
 
 	"github.com/shxntanu/epsilon/core"
 	"github.com/shxntanu/epsilon/core/contextwindow"
+	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/session"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
@@ -53,9 +54,9 @@ func Start(ctx context.Context, config Config) error {
 	selectedModel := func() (types.ModelInfo, bool) {
 		return config.Harness.CachedSelectedModelInfo()
 	}
-	program := tea.NewProgram(newModel(ctx, sess, sub.Events(), config.PermissionBroker,
+	program := tea.NewProgram(newModel(ctx, sess, sub, config.PermissionBroker,
 		config.Harness.SlashCommands(), contextSummary, selectedModel,
-		config.Harness.ListModels,
+		config.Harness.ListModels, config.Harness.ListSessions, config.Harness.ResumeSession,
 		config.Harness.CurrentModel, config.Harness.CurrentEffort,
 		config.Harness.SetModel, config.Harness.SetEffort),
 		tea.WithContext(ctx))
@@ -78,7 +79,9 @@ func startOrResume(ctx context.Context, config Config) (*session.Session, error)
 }
 
 type eventMsg types.Event
-type eventStreamClosedMsg struct{}
+type eventStreamClosedMsg struct {
+	sessionID string
+}
 type stepDoneMsg struct {
 	err error
 }
@@ -86,12 +89,23 @@ type modelListMsg struct {
 	models []types.ModelInfo
 	err    error
 }
+type sessionListMsg struct {
+	sessions []events.SessionInfo
+	err      error
+}
+type resumeSessionMsg struct {
+	sessionID string
+	session   *session.Session
+	sub       *events.Subscription
+	err       error
+}
 
 const bottomGutterHeight = 1
 
 type model struct {
 	ctx           context.Context
 	session       *session.Session
+	subscription  *events.Subscription
 	events        <-chan types.Event
 	chatBox       chatBox
 	slash         *slash.Registry
@@ -101,11 +115,14 @@ type model struct {
 	contextView   func() contextwindow.Summary
 	modelInfo     func() (types.ModelInfo, bool)
 	listModels    func(context.Context) ([]types.ModelInfo, error)
+	listSessions  func(context.Context) ([]events.SessionInfo, error)
+	resumeSession func(context.Context, string) (*session.Session, error)
 	currentModel  func() string
 	currentEffort func() string
 	setModel      func(context.Context, string) error
 	setEffort     func(string) error
 	modelPicker   *modelPicker
+	sessionPicker *sessionPicker
 	permission    *permissionPrompt
 	entries       []transcriptEntry
 	pendingUsers  []string
@@ -177,10 +194,12 @@ func (d densityMode) Label() string {
 	return "comfortable"
 }
 
-func newModel(ctx context.Context, sess *session.Session, events <-chan types.Event,
+func newModel(ctx context.Context, sess *session.Session, sub *events.Subscription,
 	broker *PermissionBroker, slashRegistry *slash.Registry,
 	contextSummary func() contextwindow.Summary, selectedModel func() (types.ModelInfo, bool),
 	listModels func(context.Context) ([]types.ModelInfo, error),
+	listSessions func(context.Context) ([]events.SessionInfo, error),
+	resumeSession func(context.Context, string) (*session.Session, error),
 	currentModel func() string, currentEffort func() string,
 	setModel func(context.Context, string) error, setEffort func(string) error) model {
 	vp := viewport.New()
@@ -243,10 +262,16 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 		spinner.WithStyle(styles.status),
 	)
 
+	var eventStream <-chan types.Event
+	if sub != nil {
+		eventStream = sub.Events()
+	}
+
 	return model{
 		ctx:           ctx,
 		session:       sess,
-		events:        events,
+		subscription:  sub,
+		events:        eventStream,
 		chatBox:       newChatBox(),
 		slash:         slashRegistry,
 		spinner:       spin,
@@ -254,6 +279,8 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 		contextView:   contextSummary,
 		modelInfo:     selectedModel,
 		listModels:    listModels,
+		listSessions:  listSessions,
+		resumeSession: resumeSession,
 		currentModel:  currentModel,
 		currentEffort: currentEffort,
 		setModel:      setModel,
@@ -294,6 +321,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.modelPicker != nil {
 			cmd := m.updateModelPicker(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.syncViewport()
+			return m, tea.Batch(cmds...)
+		}
+		if m.sessionPicker != nil {
+			cmd := m.updateSessionPicker(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -369,12 +404,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		m.followOutput = m.viewport.AtBottom()
 	case eventMsg:
-		m.addEvent(types.Event(msg))
+		event := types.Event(msg)
+		if event.SessionID == "" || event.SessionID == m.session.ID() {
+			m.addEvent(event)
+		}
 		cmds = append(cmds, m.waitForEvent())
 	case eventStreamClosedMsg:
-		m.status = "event stream closed"
+		if msg.sessionID == m.session.ID() {
+			m.status = "event stream closed"
+		}
 	case modelListMsg:
 		m.applyModelList(msg)
+	case sessionListMsg:
+		m.applySessionList(msg)
+	case resumeSessionMsg:
+		if cmd := m.applyResumeSession(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case spinner.TickMsg:
 		if m.showSpinner {
 			var cmd tea.Cmd
@@ -435,6 +481,9 @@ func (m model) View() tea.View {
 	if picker, ok := m.renderModelPicker(); ok {
 		parts = append(parts, picker)
 	}
+	if picker, ok := m.renderSessionPicker(); ok {
+		parts = append(parts, picker)
+	}
 	parts = append(parts, m.chatBox.View(), contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
@@ -457,8 +506,9 @@ func (m *model) resize() {
 	}
 	selectorHeight := m.slashSelectorHeight()
 	modelPickerHeight := m.modelPickerHeight()
+	sessionPickerHeight := m.sessionPickerHeight()
 	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-
-		permissionHeight-selectorHeight-modelPickerHeight-bottomGutterHeight)
+		permissionHeight-selectorHeight-modelPickerHeight-sessionPickerHeight-bottomGutterHeight)
 	viewportWidth := max(20, m.width-m.contextPanelWidth())
 
 	m.viewport.SetWidth(viewportWidth)
@@ -549,13 +599,21 @@ func (m *model) submit() tea.Cmd {
 }
 
 func (m model) waitForEvent() tea.Cmd {
+	sessionID := ""
+	if m.session != nil {
+		sessionID = m.session.ID()
+	}
+	events := m.events
 	return func() tea.Msg {
+		if events == nil {
+			return eventStreamClosedMsg{sessionID: sessionID}
+		}
 		select {
 		case <-m.ctx.Done():
 			return nil
-		case event, ok := <-m.events:
+		case event, ok := <-events:
 			if !ok {
-				return eventStreamClosedMsg{}
+				return eventStreamClosedMsg{sessionID: sessionID}
 			}
 			return eventMsg(event)
 		}

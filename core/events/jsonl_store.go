@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shxntanu/epsilon/core/types"
@@ -116,6 +117,56 @@ func (s *JSONLStore) Load(ctx context.Context, sessionID string) ([]types.Event,
 		}
 		events = append(events, event)
 	}
+}
+
+// ListSessions returns sessions that have persisted event logs.
+func (s *JSONLStore) ListSessions(ctx context.Context) ([]SessionInfo, error) {
+	entries, err := os.ReadDir(s.baseDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read session directory: %w", err)
+	}
+
+	sessions := make([]SessionInfo, 0, len(entries))
+	for _, entry := range entries {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("list sessions cancelled: %w", ctx.Err())
+		default:
+		}
+		if !entry.IsDir() {
+			continue
+		}
+
+		sessionID := entry.Name()
+		if err := validateSessionID(sessionID); err != nil {
+			continue
+		}
+
+		path := filepath.Join(s.baseDir, sessionID, eventsFileName)
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stat session events: %w", err)
+		}
+
+		sessions = append(sessions, SessionInfo{
+			ID:        sessionID,
+			UpdatedAt: info.ModTime(),
+		})
+	}
+
+	sort.SliceStable(sessions, func(i int, j int) bool {
+		if !sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
+			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+		}
+		return sessions[i].ID < sessions[j].ID
+	})
+	return sessions, nil
 }
 
 // BaseDir returns the absolute event store directory.

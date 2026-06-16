@@ -43,7 +43,11 @@ func (h harnessMessage) Render(text string) string {
 }
 
 func (h harnessMessage) RenderAgent(text string) string {
-	return h.renderLabeled("Agent", strings.TrimSpace(text))
+	message := strings.TrimSpace(text)
+	if message != "" {
+		message = newMarkdownRenderer(max(20, h.width-2)).Render(message)
+	}
+	return h.renderLabeled("Agent", message)
 }
 
 func (h harnessMessage) RenderSpinner(text string) string {

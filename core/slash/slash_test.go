@@ -146,6 +146,22 @@ func TestDefaultRegistryActions(t *testing.T) {
 	if !handled || result.Action != ActionSetEffort || result.Effort != "" {
 		t.Fatalf("effort off result = %#v, handled %v", result, handled)
 	}
+
+	result, handled, err = registry.Execute(context.Background(), "/resume", Execution{})
+	if err != nil {
+		t.Fatalf("execute resume picker: %v", err)
+	}
+	if !handled || result.Action != ActionPickSession {
+		t.Fatalf("resume picker result = %#v, handled %v", result, handled)
+	}
+
+	result, handled, err = registry.Execute(context.Background(), "/resume session_123", Execution{})
+	if err != nil {
+		t.Fatalf("execute resume: %v", err)
+	}
+	if !handled || result.Action != ActionResumeChat || result.Session != "session_123" {
+		t.Fatalf("resume result = %#v, handled %v", result, handled)
+	}
 }
 
 func TestUnknownCommand(t *testing.T) {

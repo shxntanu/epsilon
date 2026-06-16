@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -41,6 +42,7 @@ const defaultEventBufferSize = 64
 
 var ErrEventStoreMissing = errors.New("event store missing")
 var ErrProviderModelCatalogMissing = errors.New("provider model catalog missing")
+var ErrEventStoreSessionListMissing = errors.New("event store session list missing")
 
 func New(opts ...Option) (*Harness, error) {
 	h := &Harness{
@@ -134,6 +136,41 @@ func (h *Harness) GetSession(id string) (*session.Session, bool) {
 
 	sess, ok := h.sessions[id]
 	return sess, ok
+}
+
+func (h *Harness) ListSessions(ctx context.Context) ([]events.SessionInfo, error) {
+	known := make(map[string]events.SessionInfo)
+	if lister, ok := h.eventStore.(events.SessionLister); ok {
+		sessions, err := lister.ListSessions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, sess := range sessions {
+			known[sess.ID] = sess
+		}
+	} else if h.eventStore != nil {
+		return nil, ErrEventStoreSessionListMissing
+	}
+
+	h.mu.Lock()
+	for id := range h.sessions {
+		if _, ok := known[id]; !ok {
+			known[id] = events.SessionInfo{ID: id}
+		}
+	}
+	h.mu.Unlock()
+
+	sessions := make([]events.SessionInfo, 0, len(known))
+	for _, sess := range known {
+		sessions = append(sessions, sess)
+	}
+	sort.SliceStable(sessions, func(i int, j int) bool {
+		if !sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
+			return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+		}
+		return sessions[i].ID < sessions[j].ID
+	})
+	return sessions, nil
 }
 
 func (h *Harness) SlashCommands() *slash.Registry {
