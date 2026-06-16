@@ -70,8 +70,8 @@ type model struct {
 	events   <-chan types.Event
 	chatBox  chatBox
 	viewport viewport.Model
-	log      []string
-	logDirty bool
+	entries  []transcriptEntry
+	dirty    bool
 	width    int
 	height   int
 	busy     bool
@@ -80,15 +80,27 @@ type model struct {
 }
 
 type styles struct {
-	title  lipgloss.Style
-	status lipgloss.Style
-	help   lipgloss.Style
-	border lipgloss.Style
-	user   lipgloss.Style
-	model  lipgloss.Style
-	tool   lipgloss.Style
-	error  lipgloss.Style
-	muted  lipgloss.Style
+	title      lipgloss.Style
+	status     lipgloss.Style
+	help       lipgloss.Style
+	user       lipgloss.Style
+	userBubble lipgloss.Style
+	model      lipgloss.Style
+	tool       lipgloss.Style
+	error      lipgloss.Style
+	muted      lipgloss.Style
+}
+
+type transcriptEntryKind int
+
+const (
+	transcriptPlain transcriptEntryKind = iota
+	transcriptUser
+)
+
+type transcriptEntry struct {
+	kind transcriptEntryKind
+	text string
 }
 
 func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) model {
@@ -96,15 +108,15 @@ func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) mod
 	vp.SoftWrap = true
 
 	styles := styles{
-		title:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")),
-		status: lipgloss.NewStyle().Foreground(lipgloss.Color("86")),
-		help:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
-		border: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238")),
-		user:   lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
-		model:  lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
-		tool:   lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Bold(true),
-		error:  lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
-		muted:  lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		title:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")),
+		status:     lipgloss.NewStyle().Foreground(lipgloss.Color("86")),
+		help:       lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		user:       lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
+		userBubble: lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("236")).Padding(0, 1),
+		model:      lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
+		tool:       lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Bold(true),
+		error:      lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
+		muted:      lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 	}
 
 	return model{
@@ -115,8 +127,10 @@ func newModel(ctx context.Context, run *core.Run, events <-chan types.Event) mod
 		viewport: vp,
 		status:   "ready",
 		styles:   styles,
-		log:      []string{styles.muted.Render("Started run " + run.ID())},
-		logDirty: true,
+		entries: []transcriptEntry{
+			{kind: transcriptPlain, text: styles.muted.Render("Started run " + run.ID())},
+		},
+		dirty: true,
 	}
 }
 
@@ -179,7 +193,7 @@ func (m model) View() tea.View {
 		m.styles.status.Render(m.status)
 	help := m.styles.help.Render("enter send | shift+enter newline | esc/ctrl+c quit | tools: echo/read/write")
 
-	body := m.styles.border.Width(max(0, m.width-2)).Render(m.viewport.View())
+	body := m.viewport.View()
 	content := lipgloss.JoinVertical(lipgloss.Left, header, body, m.chatBox.View(), help)
 
 	var view tea.View
@@ -191,13 +205,13 @@ func (m model) View() tea.View {
 func (m *model) resize() {
 	headerHeight := 1
 	helpHeight := 1
-	borderPadding := 2
 	m.chatBox.SetWidth(m.width)
-	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-borderPadding)
-	viewportWidth := max(20, m.width-4)
+	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight)
+	viewportWidth := max(20, m.width)
 
 	m.viewport.SetWidth(viewportWidth)
 	m.viewport.SetHeight(viewportHeight)
+	m.dirty = true
 }
 
 func (m *model) submit() tea.Cmd {
@@ -244,7 +258,7 @@ func (m *model) addEvent(event types.Event) {
 		if event.Message != nil {
 			text := textFromContent(event.Message.Content)
 			if text != "" {
-				m.appendLog(m.styles.user.Render("you") + ": " + text)
+				m.appendUserMessage(text)
 			}
 		}
 	case types.EventModelStarted:
@@ -291,17 +305,61 @@ func (m *model) addEvent(event types.Event) {
 }
 
 func (m *model) appendLog(line string) {
-	m.log = append(m.log, line)
-	m.logDirty = true
+	m.entries = append(m.entries, transcriptEntry{
+		kind: transcriptPlain,
+		text: line,
+	})
+	m.dirty = true
+}
+
+func (m *model) appendUserMessage(text string) {
+	m.entries = append(m.entries, transcriptEntry{
+		kind: transcriptUser,
+		text: text,
+	})
+	m.dirty = true
 }
 
 func (m *model) syncViewport() {
-	if !m.logDirty {
+	if !m.dirty {
 		return
 	}
-	m.viewport.SetContent(strings.Join(m.log, "\n"))
+	m.viewport.SetContent(m.renderTranscript())
 	m.viewport.GotoBottom()
-	m.logDirty = false
+	m.dirty = false
+}
+
+func (m model) renderTranscript() string {
+	lines := make([]string, 0, len(m.entries))
+	for _, entry := range m.entries {
+		switch entry.kind {
+		case transcriptUser:
+			lines = append(lines, m.renderUserMessage(entry.text))
+		default:
+			lines = append(lines, entry.text)
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func (m model) renderUserMessage(text string) string {
+	message := strings.Join(prefixLines(strings.Split(text, "\n"), "> ", "  "), "\n")
+	width := max(20, m.viewport.Width())
+	return m.styles.userBubble.Width(width).Render(message)
+}
+
+func prefixLines(lines []string, firstPrefix string, restPrefix string) []string {
+	prefixed := make([]string, 0, len(lines))
+	for i, line := range lines {
+		prefix := restPrefix
+		if i == 0 {
+			prefix = firstPrefix
+		}
+		prefixed = append(prefixed, prefix+line)
+	}
+
+	return prefixed
 }
 
 func quitCmd() tea.Cmd {
