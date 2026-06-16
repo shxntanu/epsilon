@@ -253,6 +253,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chatBox, cmd = m.chatBox.Update(msg)
 			cmds = append(cmds, cmd)
 		}
+	case tea.MouseWheelMsg:
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		cmds = append(cmds, cmd)
+		m.followOutput = m.viewport.AtBottom()
 	case eventMsg:
 		m.addEvent(types.Event(msg))
 		cmds = append(cmds, m.waitForEvent())
@@ -313,6 +318,7 @@ func (m model) View() tea.View {
 	var view tea.View
 	view.SetContent(content)
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	return view
 }
 
