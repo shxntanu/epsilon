@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/shxntanu/epsilon/core"
+	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/session"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
@@ -43,8 +44,14 @@ func Start(ctx context.Context, config Config) error {
 	}
 	defer sub.Close()
 
+	contextSummary := func() contextwindow.Summary {
+		if summary, ok := config.Harness.ContextSummary(sess.ID()); ok {
+			return summary
+		}
+		return sess.ContextSummary(nil)
+	}
 	program := tea.NewProgram(newModel(ctx, sess, sub.Events(), config.PermissionBroker,
-		config.Harness.SlashCommands()),
+		config.Harness.SlashCommands(), contextSummary),
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -81,6 +88,7 @@ type model struct {
 	slashCursor  int
 	spinner      spinner.Model
 	viewport     viewport.Model
+	contextView  func() contextwindow.Summary
 	permission   *permissionPrompt
 	entries      []transcriptEntry
 	pendingUsers []string
@@ -91,6 +99,7 @@ type model struct {
 	busy         bool
 	showSpinner  bool
 	showEvents   bool
+	showContext  bool
 	density      densityMode
 	status       string
 	styles       styles
@@ -152,11 +161,17 @@ func (d densityMode) Label() string {
 }
 
 func newModel(ctx context.Context, sess *session.Session, events <-chan types.Event,
-	broker *PermissionBroker, slashRegistry *slash.Registry) model {
+	broker *PermissionBroker, slashRegistry *slash.Registry,
+	contextSummary func() contextwindow.Summary) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
 	if slashRegistry == nil {
 		slashRegistry = slash.NewDefaultRegistry()
+	}
+	if contextSummary == nil {
+		contextSummary = func() contextwindow.Summary {
+			return sess.ContextSummary(nil)
+		}
 	}
 
 	styles := styles{
@@ -204,18 +219,19 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 	)
 
 	return model{
-		ctx:       ctx,
-		session:   sess,
-		events:    events,
-		chatBox:   newChatBox(),
-		slash:     slashRegistry,
-		spinner:   spin,
-		viewport:  vp,
-		density:   densityComfortable,
-		status:    "ready",
-		styles:    styles,
-		broker:    broker,
-		streaming: -1,
+		ctx:         ctx,
+		session:     sess,
+		events:      events,
+		chatBox:     newChatBox(),
+		slash:       slashRegistry,
+		spinner:     spin,
+		viewport:    vp,
+		contextView: contextSummary,
+		density:     densityComfortable,
+		status:      "ready",
+		styles:      styles,
+		broker:      broker,
+		streaming:   -1,
 		entries: []transcriptEntry{
 			{kind: transcriptEvent, text: styles.muted.Render("Started session " + sess.ID())},
 		},
@@ -288,6 +304,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+o":
 			m.showEvents = !m.showEvents
 			m.dirty = true
+		case "ctrl+x":
+			m.showContext = !m.showContext
+			m.resize()
 		case "ctrl+t":
 			m.toggleDensity()
 			m.resize()
@@ -356,12 +375,15 @@ func (m model) View() tea.View {
 		m.styles.status.Render(m.status),
 	)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
-	help := m.styles.help.Render("enter send | shift+enter newline | ctrl+o events:" +
-		onOff(m.showEvents) + " | ctrl+t density:" + m.density.Label() +
-		" | pgup/pgdn scroll | esc quit")
+	help := m.styles.help.Render("ctrl+o events:" + onOff(m.showEvents) +
+		" | ctrl+x context:" + onOff(m.showContext) + " | esc quit")
+	contextLine := m.renderContextWidget()
 	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
 
 	body := m.viewport.View()
+	if m.contextPanelWidth() > 0 {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, body, m.renderContextPanel())
+	}
 	parts := []string{header, body}
 	if m.permission != nil {
 		parts = append(parts, m.permission.View())
@@ -369,7 +391,7 @@ func (m model) View() tea.View {
 	if selector, ok := m.renderSlashSelector(); ok {
 		parts = append(parts, selector)
 	}
-	parts = append(parts, m.chatBox.View(), help, bottomGutter)
+	parts = append(parts, m.chatBox.View(), contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	var view tea.View
@@ -381,7 +403,7 @@ func (m model) View() tea.View {
 
 func (m *model) resize() {
 	headerHeight := 2
-	helpHeight := 1
+	helpHeight := 2
 	m.chatBox.SetDensity(m.density)
 	m.chatBox.SetWidth(m.width)
 	permissionHeight := 0
@@ -392,11 +414,34 @@ func (m *model) resize() {
 	selectorHeight := m.slashSelectorHeight()
 	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-
 		permissionHeight-selectorHeight-bottomGutterHeight)
-	viewportWidth := max(20, m.width)
+	viewportWidth := max(20, m.width-m.contextPanelWidth())
 
 	m.viewport.SetWidth(viewportWidth)
 	m.viewport.SetHeight(viewportHeight)
 	m.dirty = true
+}
+
+func (m model) renderContextWidget() string {
+	return newContextWidget(m.contextView(), m.width).View()
+}
+
+func (m model) renderContextPanel() string {
+	width := m.contextPanelWidth()
+	if width == 0 {
+		return ""
+	}
+	return newContextPanel(m.contextView(), width, m.viewport.Height()).Panel()
+}
+
+func (m model) contextPanelWidth() int {
+	if !m.showContext {
+		return 0
+	}
+	available := m.width - 24
+	if available < contextPanelMinWidth {
+		return 0
+	}
+	return min(contextPanelMaxWidth, max(contextPanelMinWidth, m.width/3))
 }
 
 func (m *model) toggleDensity() {
