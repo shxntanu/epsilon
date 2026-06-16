@@ -76,6 +76,37 @@ func TestModelPickerSelectsCurrentModel(t *testing.T) {
 	}
 }
 
+func TestModelPickerFiltersFuzzily(t *testing.T) {
+	picker := modelPicker{
+		models: []types.ModelInfo{
+			{ID: "claude-sonnet-4"},
+			{ID: "gpt-4o"},
+			{ID: "gpt-5.4"},
+		},
+		query: "g54",
+	}
+	picker.filter("")
+
+	visible := picker.visibleModels()
+	if len(visible) != 1 || visible[0].ID != "gpt-5.4" {
+		t.Fatalf("visible = %#v, want only gpt-5.4", visible)
+	}
+}
+
+func TestFormatModelRowOmitsMetadata(t *testing.T) {
+	row := formatModelRow(types.ModelInfo{
+		ID:             "gpt-5.4",
+		Name:           "GPT 5.4",
+		Provider:       "openai",
+		ProviderModel:  "openai/gpt-5.4",
+		MaxInputTokens: 128000,
+	}, "", 80)
+
+	if row != "GPT 5.4" {
+		t.Fatalf("row = %q, want display name only", row)
+	}
+}
+
 func TestModelWindowKeepsCursorVisible(t *testing.T) {
 	start, end := modelWindow(9, 12, 5)
 	if start != 7 || end != 12 {
