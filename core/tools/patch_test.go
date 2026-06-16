@@ -1,0 +1,129 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/shxntanu/epsilon/core/types"
+)
+
+func TestPatchToolAppliesUnifiedInsertionAtCorrectLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+
+	tool, err := NewPatchTool(dir)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := runPatchTool(t, tool, `--- a/sample.txt
++++ b/sample.txt
+@@ -2,0 +3,1 @@
++inserted
+`)
+	if result.IsError {
+		t.Fatalf("patch failed: %s", result.Content[0].Text)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read sample: %v", err)
+	}
+	want := "one\ntwo\ninserted\nthree\n"
+	if string(got) != want {
+		t.Fatalf("unexpected content:\nwant %q\n got %q", want, string(got))
+	}
+}
+
+func TestPatchToolAppliesAgentUpdatePatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\ngamma\n"), 0o644); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+
+	tool, err := NewPatchTool(dir)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := runPatchTool(t, tool, `*** Begin Patch
+*** Update File: sample.txt
+@@
+ alpha
+-beta
++bravo
+ gamma
+*** End Patch
+`)
+	if result.IsError {
+		t.Fatalf("patch failed: %s", result.Content[0].Text)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read sample: %v", err)
+	}
+	want := "alpha\nbravo\ngamma\n"
+	if string(got) != want {
+		t.Fatalf("unexpected content:\nwant %q\n got %q", want, string(got))
+	}
+}
+
+func TestPatchToolAppliesAgentAddAndDeletePatch(t *testing.T) {
+	dir := t.TempDir()
+	deletePath := filepath.Join(dir, "delete-me.txt")
+	if err := os.WriteFile(deletePath, []byte("gone\n"), 0o644); err != nil {
+		t.Fatalf("write delete target: %v", err)
+	}
+
+	tool, err := NewPatchTool(dir)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	result := runPatchTool(t, tool, `*** Begin Patch
+*** Add File: nested/new.txt
++hello
++world
+*** Delete File: delete-me.txt
+*** End Patch
+`)
+	if result.IsError {
+		t.Fatalf("patch failed: %s", result.Content[0].Text)
+	}
+
+	added, err := os.ReadFile(filepath.Join(dir, "nested", "new.txt"))
+	if err != nil {
+		t.Fatalf("read added file: %v", err)
+	}
+	if string(added) != "hello\nworld\n" {
+		t.Fatalf("unexpected added content: %q", string(added))
+	}
+	if _, err := os.Stat(deletePath); !os.IsNotExist(err) {
+		t.Fatalf("delete target still exists or stat failed: %v", err)
+	}
+}
+
+func runPatchTool(t *testing.T, tool *PatchTool, patch string) *types.ToolResult {
+	t.Helper()
+
+	input, err := json.Marshal(PatchInput{Patch: patch})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	result, err := tool.Run(context.Background(), input)
+	if err != nil {
+		t.Fatalf("run patch tool: %v", err)
+	}
+	if result == nil {
+		t.Fatalf("nil patch result")
+	}
+	return result
+}
