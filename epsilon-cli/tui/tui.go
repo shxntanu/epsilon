@@ -107,7 +107,6 @@ type styles struct {
 	userLabel      lipgloss.Style
 	agentLabel     lipgloss.Style
 	userBlock      lipgloss.Style
-	agentBlock     lipgloss.Style
 	eventBlock     lipgloss.Style
 	diffBlock      lipgloss.Style
 	diffHeader     lipgloss.Style
@@ -179,12 +178,6 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 			Foreground(lipgloss.Color("252")).
 			Background(lipgloss.Color("236")).
 			Padding(0, 1),
-		agentBlock: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			BorderStyle(lipgloss.ThickBorder()).
-			BorderLeft(true).
-			BorderForeground(lipgloss.Color("103")).
-			PaddingLeft(1),
 		eventBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("246")).
 			Background(lipgloss.Color("235")).
@@ -683,6 +676,8 @@ func (m model) renderTranscript() string {
 
 func (m model) renderTranscriptEntry(entry transcriptEntry) (string, bool) {
 	switch entry.kind {
+	case transcriptPlain:
+		return m.renderHarnessMessage(entry.text), true
 	case transcriptUser:
 		return m.renderUserMessage(entry.text), true
 	case transcriptAgent:
@@ -700,30 +695,16 @@ func (m model) renderTranscriptEntry(entry transcriptEntry) (string, bool) {
 }
 
 func (m model) renderAgentMessage(text string) string {
-	label := m.styles.agentLabel.Render("Agent")
-	if m.density == densityCompact {
-		return label + " " + m.styles.muted.Render("-") + " " + strings.TrimSpace(text)
-	}
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		label,
-		m.styles.agentBlock.Width(m.messageWidth()).Render(strings.TrimSpace(text)),
-	)
+	return m.harnessMessage().RenderAgent(text)
 }
 
 func (m model) renderSpinnerMessage() string {
-	label := m.styles.agentLabel.Render("Agent")
 	responding := m.spinner.View() + " " + m.styles.muted.Render("responding")
-	if m.density == densityCompact {
-		return label + " " + m.styles.muted.Render("-") + " " + responding
-	}
+	return m.harnessMessage().RenderSpinner(responding)
+}
 
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		label,
-		m.styles.agentBlock.Width(m.messageWidth()).Render(responding),
-	)
+func (m model) renderHarnessMessage(text string) string {
+	return m.harnessMessage().Render(text)
 }
 
 func (m model) renderUserMessage(text string) string {
@@ -785,6 +766,19 @@ func (m model) renderDiffBody(diff string) string {
 
 func (m model) messageWidth() int {
 	return max(20, m.viewport.Width()-2)
+}
+
+func (m model) harnessMessageWidth() int {
+	return max(20, m.viewport.Width())
+}
+
+func (m model) harnessMessage() harnessMessage {
+	return newHarnessMessage(
+		m.harnessMessageWidth(),
+		m.density,
+		m.styles.agentLabel,
+		m.styles.muted,
+	)
 }
 
 func (m model) entrySeparator() string {

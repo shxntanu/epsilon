@@ -1,0 +1,68 @@
+package tui
+
+import (
+	"strings"
+
+	"charm.land/lipgloss/v2"
+)
+
+type harnessMessage struct {
+	width      int
+	density    densityMode
+	label      lipgloss.Style
+	muted      lipgloss.Style
+	block      lipgloss.Style
+	agentBlock lipgloss.Style
+}
+
+func newHarnessMessage(width int, density densityMode, label lipgloss.Style,
+	muted lipgloss.Style) harnessMessage {
+	return harnessMessage{
+		width:   max(20, width),
+		density: density,
+		label:   label,
+		muted:   muted,
+		block: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Background(lipgloss.Color("235")).
+			Padding(0, 1),
+		agentBlock: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			BorderStyle(lipgloss.ThickBorder()).
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("103")).
+			Background(lipgloss.Color("235")).
+			PaddingLeft(1),
+	}
+}
+
+func (h harnessMessage) Render(text string) string {
+	message := strings.TrimSpace(text)
+	if message == "" {
+		return ""
+	}
+
+	return h.block.Width(h.width).Render(message)
+}
+
+func (h harnessMessage) RenderAgent(text string) string {
+	return h.renderLabeled("Agent", strings.TrimSpace(text))
+}
+
+func (h harnessMessage) RenderSpinner(text string) string {
+	return h.renderLabeled("Agent", strings.TrimSpace(text))
+}
+
+func (h harnessMessage) renderLabeled(label string, text string) string {
+	renderedLabel := h.label.Render(label)
+	if h.density == densityCompact {
+		return h.block.Width(h.width).Render(
+			renderedLabel + " " + h.muted.Render("-") + " " + text)
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		renderedLabel,
+		h.agentBlock.Width(h.width).Render(text),
+	)
+}
