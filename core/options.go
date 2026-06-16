@@ -95,6 +95,11 @@ func WithDefaultTools(workspaceRoot string) Option {
 			return fmt.Errorf("create grep_search tool: %w", err)
 		}
 
-		return WithTools(echoTool, readFileTool, writeFileTool, grepTool)(h)
+		patchTool, err := tools.NewPatchTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create apply_patch tool: %w", err)
+		}
+
+		return WithTools(echoTool, readFileTool, writeFileTool, grepTool, patchTool)(h)
 	}
 }
