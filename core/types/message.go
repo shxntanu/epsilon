@@ -135,3 +135,28 @@ type Usage struct {
 	OutputTokens int `json:"output_tokens,omitempty"`
 	TotalTokens  int `json:"total_tokens,omitempty"`
 }
+
+// ModelInfo is provider-neutral metadata about an available model.
+type ModelInfo struct {
+	ID              string       `json:"id"`
+	Name            string       `json:"name,omitempty"`
+	Provider        string       `json:"provider,omitempty"`
+	Mode            string       `json:"mode,omitempty"`
+	MaxInputTokens  int          `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens int          `json:"max_output_tokens,omitempty"`
+	MaxTokens       int          `json:"max_tokens,omitempty"`
+	Pricing         ModelPricing `json:"pricing,omitempty"`
+}
+
+// ModelPricing captures token pricing normalized to per-token cost.
+type ModelPricing struct {
+	InputCostPerToken        float64 `json:"input_cost_per_token,omitempty"`
+	OutputCostPerToken       float64 `json:"output_cost_per_token,omitempty"`
+	CacheReadCostPerToken    float64 `json:"cache_read_cost_per_token,omitempty"`
+	CacheWriteCostPerToken   float64 `json:"cache_write_cost_per_token,omitempty"`
+	ReasoningCostPerToken    float64 `json:"reasoning_cost_per_token,omitempty"`
+	InputCostPer1KTokens     float64 `json:"input_cost_per_1k_tokens,omitempty"`
+	OutputCostPer1KTokens    float64 `json:"output_cost_per_1k_tokens,omitempty"`
+	CacheReadCostPer1KToken  float64 `json:"cache_read_cost_per_1k_tokens,omitempty"`
+	CacheWriteCostPer1KToken float64 `json:"cache_write_cost_per_1k_tokens,omitempty"`
+}

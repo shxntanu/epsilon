@@ -21,3 +21,14 @@ type StreamingProvider interface {
 	StreamRespond(ctx context.Context, req ModelRequest,
 		emit func(ModelDelta) error) (*ModelResponse, error)
 }
+
+// ModelCatalogProvider can list provider models and their metadata when the
+// backing provider exposes model discovery.
+type ModelCatalogProvider interface {
+	ListModels(ctx context.Context) ([]ModelInfo, error)
+}
+
+// SelectedModelProvider identifies the provider's currently configured model.
+type SelectedModelProvider interface {
+	SelectedModel() string
+}

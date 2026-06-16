@@ -33,6 +33,7 @@ type Harness struct {
 const defaultEventBufferSize = 64
 
 var ErrEventStoreMissing = errors.New("event store missing")
+var ErrProviderModelCatalogMissing = errors.New("provider model catalog missing")
 
 func New(opts ...Option) (*Harness, error) {
 	h := &Harness{
@@ -133,6 +134,34 @@ func (h *Harness) ContextSummary(sessionID string) (contextwindow.Summary, bool)
 	}
 
 	return sess.ContextSummary(h.contextTracker), true
+}
+
+func (h *Harness) ListModels(ctx context.Context) ([]types.ModelInfo, error) {
+	catalog, ok := h.provider.(types.ModelCatalogProvider)
+	if !ok {
+		return nil, ErrProviderModelCatalogMissing
+	}
+	return catalog.ListModels(ctx)
+}
+
+func (h *Harness) SelectedModelInfo(ctx context.Context) (types.ModelInfo, bool, error) {
+	selected, ok := h.provider.(types.SelectedModelProvider)
+	if !ok {
+		return types.ModelInfo{}, false, nil
+	}
+
+	models, err := h.ListModels(ctx)
+	if err != nil {
+		return types.ModelInfo{}, false, err
+	}
+
+	selectedID := selected.SelectedModel()
+	for _, model := range models {
+		if model.ID == selectedID || model.Name == selectedID {
+			return model, true, nil
+		}
+	}
+	return types.ModelInfo{}, false, nil
 }
 
 func randomSessionID() (string, error) {
