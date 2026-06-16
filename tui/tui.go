@@ -15,6 +15,7 @@ import (
 
 	"github.com/shxntanu/epsilon/core"
 	"github.com/shxntanu/epsilon/core/session"
+	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
 )
 
@@ -42,7 +43,8 @@ func Start(ctx context.Context, config Config) error {
 	}
 	defer sub.Close()
 
-	program := tea.NewProgram(newModel(ctx, sess, sub.Events(), config.PermissionBroker),
+	program := tea.NewProgram(newModel(ctx, sess, sub.Events(), config.PermissionBroker,
+		config.Harness.SlashCommands()),
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -73,6 +75,8 @@ type model struct {
 	session      *session.Session
 	events       <-chan types.Event
 	chatBox      chatBox
+	slash        *slash.Registry
+	slashCursor  int
 	spinner      spinner.Model
 	viewport     viewport.Model
 	permission   *permissionPrompt
@@ -93,24 +97,27 @@ type model struct {
 }
 
 type styles struct {
-	header     lipgloss.Style
-	title      lipgloss.Style
-	sessionID  lipgloss.Style
-	status     lipgloss.Style
-	help       lipgloss.Style
-	userLabel  lipgloss.Style
-	agentLabel lipgloss.Style
-	userBlock  lipgloss.Style
-	agentBlock lipgloss.Style
-	eventBlock lipgloss.Style
-	diffBlock  lipgloss.Style
-	diffHeader lipgloss.Style
-	diffAdd    lipgloss.Style
-	diffRemove lipgloss.Style
-	diffMeta   lipgloss.Style
-	tool       lipgloss.Style
-	error      lipgloss.Style
-	muted      lipgloss.Style
+	header         lipgloss.Style
+	title          lipgloss.Style
+	sessionID      lipgloss.Style
+	status         lipgloss.Style
+	help           lipgloss.Style
+	userLabel      lipgloss.Style
+	agentLabel     lipgloss.Style
+	userBlock      lipgloss.Style
+	agentBlock     lipgloss.Style
+	eventBlock     lipgloss.Style
+	diffBlock      lipgloss.Style
+	diffHeader     lipgloss.Style
+	diffAdd        lipgloss.Style
+	diffRemove     lipgloss.Style
+	diffMeta       lipgloss.Style
+	selector       lipgloss.Style
+	selectorActive lipgloss.Style
+	selectorTitle  lipgloss.Style
+	tool           lipgloss.Style
+	error          lipgloss.Style
+	muted          lipgloss.Style
 }
 
 type transcriptEntryKind int
@@ -144,9 +151,12 @@ func (d densityMode) Label() string {
 }
 
 func newModel(ctx context.Context, sess *session.Session, events <-chan types.Event,
-	broker *PermissionBroker) model {
+	broker *PermissionBroker, slashRegistry *slash.Registry) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
+	if slashRegistry == nil {
+		slashRegistry = slash.NewDefaultRegistry()
+	}
 
 	styles := styles{
 		header: lipgloss.NewStyle().
@@ -192,6 +202,7 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 		error:      lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
 		muted:      lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 	}
+	styles = selectorStyles(styles)
 	spin := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(styles.status),
@@ -202,6 +213,7 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 		session:   sess,
 		events:    events,
 		chatBox:   newChatBox(),
+		slash:     slashRegistry,
 		spinner:   spin,
 		viewport:  vp,
 		density:   densityComfortable,
@@ -242,6 +254,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Keystroke() {
 		case "ctrl+c", "esc":
 			return m, quitCmd()
+		case "up", "ctrl+p":
+			if m.moveSlashSelection(-1) {
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.chatBox, cmd = m.chatBox.Update(msg)
+			cmds = append(cmds, cmd)
+			m.resize()
+		case "down", "ctrl+n":
+			if m.moveSlashSelection(1) {
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.chatBox, cmd = m.chatBox.Update(msg)
+			cmds = append(cmds, cmd)
+			m.resize()
+		case "tab":
+			if m.completeSlashSelection() {
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.chatBox, cmd = m.chatBox.Update(msg)
+			cmds = append(cmds, cmd)
+			m.resize()
 		case "pgup":
 			m.viewport.PageUp()
 			m.followOutput = false
@@ -261,6 +297,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toggleDensity()
 			m.resize()
 		case "enter":
+			if m.completeIncompleteSlashInput() {
+				return m, nil
+			}
 			cmd := m.submit()
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -269,6 +308,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.chatBox, cmd = m.chatBox.Update(msg)
 			cmds = append(cmds, cmd)
+			m.resize()
 		}
 	case tea.MouseWheelMsg:
 		var cmd tea.Cmd
@@ -304,6 +344,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		m.chatBox, cmd = m.chatBox.Update(msg)
 		cmds = append(cmds, cmd)
+		m.resize()
 	}
 
 	m.syncViewport()
@@ -329,6 +370,9 @@ func (m model) View() tea.View {
 	if m.permission != nil {
 		parts = append(parts, m.permission.View())
 	}
+	if selector, ok := m.renderSlashSelector(); ok {
+		parts = append(parts, selector)
+	}
 	parts = append(parts, m.chatBox.View(), help)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
@@ -349,7 +393,9 @@ func (m *model) resize() {
 		m.permission.SetWidth(m.width)
 		permissionHeight = 6
 	}
-	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-permissionHeight)
+	selectorHeight := m.slashSelectorHeight()
+	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-
+		permissionHeight-selectorHeight)
 	viewportWidth := max(20, m.width)
 
 	m.viewport.SetWidth(viewportWidth)
@@ -374,6 +420,14 @@ func (m *model) submit() tea.Cmd {
 	text, ok := m.chatBox.Submit()
 	if !ok {
 		return nil
+	}
+	if parsed := slash.ParseInput(text); parsed.Escaped {
+		text = slash.UnescapeInput(text)
+	} else if parsed.OK {
+		result, handled, err := m.slash.Execute(m.ctx, text, m.slashExecution())
+		if handled {
+			return m.applySlashResult(result, err)
+		}
 	}
 
 	m.appendUserMessage(text)

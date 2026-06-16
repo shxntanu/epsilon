@@ -5,6 +5,7 @@ import (
 
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
+	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
 )
@@ -35,6 +36,13 @@ func WithProvider(provider types.Provider) Option {
 func WithPermissionBroker(broker permissions.Broker) Option {
 	return func(h *Harness) error {
 		h.permissionBroker = broker
+		return nil
+	}
+}
+
+func WithSlashCommand(command slash.Command) Option {
+	return func(h *Harness) error {
+		h.slashRegistry.Register(command)
 		return nil
 	}
 }

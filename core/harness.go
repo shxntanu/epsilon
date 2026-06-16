@@ -11,6 +11,7 @@ import (
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/session"
+	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
 )
@@ -22,6 +23,7 @@ type Harness struct {
 	newSessionID     func() (string, error)
 	provider         types.Provider
 	toolRegistry     *tools.Registry
+	slashRegistry    *slash.Registry
 	permissionBroker permissions.Broker
 	eventStore       events.Store
 }
@@ -36,6 +38,7 @@ func New(opts ...Option) (*Harness, error) {
 		eventBufferSize: defaultEventBufferSize,
 		newSessionID:    randomSessionID,
 		toolRegistry:    tools.NewRegistry(),
+		slashRegistry:   slash.NewDefaultRegistry(),
 	}
 
 	for _, opt := range opts {
@@ -114,6 +117,10 @@ func (h *Harness) GetSession(id string) (*session.Session, bool) {
 
 	sess, ok := h.sessions[id]
 	return sess, ok
+}
+
+func (h *Harness) SlashCommands() *slash.Registry {
+	return h.slashRegistry
 }
 
 func randomSessionID() (string, error) {

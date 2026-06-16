@@ -68,6 +68,15 @@ func (c chatBox) View() string {
 	return c.style.Width(max(0, c.width-4)).Render(c.input.View())
 }
 
+func (c chatBox) Value() string {
+	return c.input.Value()
+}
+
+func (c *chatBox) SetValue(value string) {
+	c.input.SetValue(value)
+	c.input.CursorEnd()
+}
+
 func (c *chatBox) SetWidth(width int) {
 	c.width = width
 	c.input.SetWidth(max(20, width-8))
