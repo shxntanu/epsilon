@@ -1,6 +1,6 @@
 # epsilon
 
-![](./assets/header.jpg)
+![](./assets/screenshot.png)
 
 ## Quickstart
 
