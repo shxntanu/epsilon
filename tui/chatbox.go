@@ -33,14 +33,14 @@ func newChatBox() chatBox {
 	styles.Focused.CursorLine = lipgloss.NewStyle().Background(lipgloss.Color("235"))
 	styles.Focused.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
 	styles.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(lipgloss.Color("235"))
-	styles.Cursor.Color = lipgloss.Color("212")
+	styles.Cursor.Color = lipgloss.Color("146")
 	input.SetStyles(styles)
 
 	return chatBox{
 		input: input,
 		style: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63")).
+			BorderForeground(lipgloss.Color("241")).
 			Foreground(lipgloss.Color("252")).
 			Padding(0, 1),
 	}
