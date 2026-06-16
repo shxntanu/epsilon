@@ -22,6 +22,11 @@ func tuiCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
+	var permissionBroker *tui.PermissionBroker
+	if !*allowAll {
+		permissionBroker = tui.NewPermissionBroker()
+	}
+
 	harness, err := newHarness(harnessConfig{
 		sessionDir:     *sessionDir,
 		workspace:      *workspace,
@@ -30,13 +35,15 @@ func tuiCommand(ctx context.Context, args []string) error {
 		litellmBaseURL: *litellmBaseURL,
 		litellmAPIKey:  *litellmAPIKey,
 		allowAll:       *allowAll,
+		broker:         permissionBroker,
 	})
 	if err != nil {
 		return err
 	}
 
 	config := tui.Config{
-		Harness: harness,
+		Harness:          harness,
+		PermissionBroker: permissionBroker,
 	}
 	if remaining := fs.Args(); len(remaining) > 0 {
 		config.SessionID = remaining[0]

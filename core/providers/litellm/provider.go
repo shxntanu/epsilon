@@ -1,6 +1,7 @@
 package litellm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -126,6 +127,7 @@ type chatCompletionRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
 	Tools    []chatTool    `json:"tools,omitempty"`
+	Stream   bool          `json:"stream,omitempty"`
 }
 
 type chatMessage struct {
@@ -148,6 +150,7 @@ type chatFunction struct {
 
 type chatToolCall struct {
 	ID       string           `json:"id"`
+	Index    int              `json:"index,omitempty"`
 	Type     string           `json:"type,omitempty"`
 	Function chatCallFunction `json:"function"`
 }
@@ -166,6 +169,148 @@ type chatCompletionResponse struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
+}
+
+type chatCompletionStreamResponse struct {
+	Choices []struct {
+		Delta chatStreamDelta `json:"delta"`
+	} `json:"choices"`
+}
+
+type chatStreamDelta struct {
+	Role      string         `json:"role,omitempty"`
+	Content   string         `json:"content,omitempty"`
+	ToolCalls []chatToolCall `json:"tool_calls,omitempty"`
+}
+
+// StreamRespond sends a streaming chat completion request to the LiteLLM proxy.
+func (p *Provider) StreamRespond(ctx context.Context, req types.ModelRequest,
+	emit func(types.ModelDelta) error) (*types.ModelResponse, error) {
+	payload := chatCompletionRequest{
+		Model:    p.model,
+		Messages: convertMessages(req.Messages),
+		Tools:    convertTools(req.Tools),
+		Stream:   true,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode litellm stream request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		p.baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create litellm stream request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	httpResp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send litellm stream request: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 4*1024*1024))
+		if err != nil {
+			return nil, fmt.Errorf("read litellm stream error response: %w", err)
+		}
+		return nil, fmt.Errorf("litellm stream request failed: status %d: %s",
+			httpResp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	message, err := readStreamResponse(ctx, httpResp.Body, emit)
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.ModelResponse{
+		Message: message,
+	}, nil
+}
+
+func readStreamResponse(ctx context.Context, body io.Reader,
+	emit func(types.ModelDelta) error) (types.Message, error) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var content strings.Builder
+	var toolCalls []chatToolCall
+
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return types.Message{}, fmt.Errorf("litellm stream cancelled: %w", err)
+		}
+
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		data, ok := strings.CutPrefix(line, "data:")
+		if !ok {
+			continue
+		}
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk chatCompletionStreamResponse
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return types.Message{}, fmt.Errorf("decode litellm stream chunk: %w", err)
+		}
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		delta := chunk.Choices[0].Delta
+		if delta.Content != "" {
+			content.WriteString(delta.Content)
+			if emit != nil {
+				if err := emit(types.ModelDelta{Text: delta.Content}); err != nil {
+					return types.Message{}, err
+				}
+			}
+		}
+		toolCalls = mergeStreamToolCalls(toolCalls, delta.ToolCalls)
+	}
+	if err := scanner.Err(); err != nil {
+		return types.Message{}, fmt.Errorf("read litellm stream: %w", err)
+	}
+
+	return types.Message{
+		Role:      types.RoleAssistant,
+		Content:   []types.ContentPart{types.TextPart(content.String())},
+		ToolCalls: convertResponseToolCalls(toolCalls),
+	}, nil
+}
+
+func mergeStreamToolCalls(existing []chatToolCall, deltas []chatToolCall) []chatToolCall {
+	for _, delta := range deltas {
+		for len(existing) <= delta.Index {
+			existing = append(existing, chatToolCall{Index: len(existing)})
+		}
+
+		call := &existing[delta.Index]
+		if delta.ID != "" {
+			call.ID = delta.ID
+		}
+		if delta.Type != "" {
+			call.Type = delta.Type
+		}
+		if delta.Function.Name != "" {
+			call.Function.Name += delta.Function.Name
+		}
+		if delta.Function.Arguments != "" {
+			call.Function.Arguments += delta.Function.Arguments
+		}
+	}
+
+	return existing
 }
 
 func convertMessages(messages []types.Message) []chatMessage {

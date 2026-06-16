@@ -187,7 +187,7 @@ func (s *Session) Step(ctx context.Context) error {
 			return fmt.Errorf("publish model started event: %w", err)
 		}
 
-		resp, err := provider.Respond(ctx, types.ModelRequest{
+		resp, err := s.respond(ctx, provider, types.ModelRequest{
 			Messages: messages,
 			Tools:    toolDefs,
 		})
@@ -241,6 +241,26 @@ func (s *Session) modelRequestState() ([]types.Message, types.Provider, *tools.R
 	copy(messages, s.messages)
 
 	return messages, s.provider, s.tools, nil
+}
+
+func (s *Session) respond(ctx context.Context, provider types.Provider,
+	req types.ModelRequest) (*types.ModelResponse, error) {
+	streamer, ok := provider.(types.StreamingProvider)
+	if !ok {
+		return provider.Respond(ctx, req)
+	}
+
+	return streamer.StreamRespond(ctx, req, func(delta types.ModelDelta) error {
+		if delta.Text == "" {
+			return nil
+		}
+
+		_, err := s.bus.Publish(ctx, types.NewModelTextDeltaEvent(time.Now().UTC(), delta.Text))
+		if err != nil {
+			return fmt.Errorf("publish model text delta event: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Session) executeToolCalls(ctx context.Context, calls []types.ToolCall,

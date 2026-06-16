@@ -20,8 +20,9 @@ import (
 
 // Config configures a TUI session.
 type Config struct {
-	Harness   *core.Harness
-	SessionID string
+	Harness          *core.Harness
+	SessionID        string
+	PermissionBroker *PermissionBroker
 }
 
 // Start starts the TUI.
@@ -41,7 +42,8 @@ func Start(ctx context.Context, config Config) error {
 	}
 	defer sub.Close()
 
-	program := tea.NewProgram(newModel(ctx, sess, sub.Events()), tea.WithContext(ctx))
+	program := tea.NewProgram(newModel(ctx, sess, sub.Events(), config.PermissionBroker),
+		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
 			return ctx.Err()
@@ -73,9 +75,11 @@ type model struct {
 	chatBox      chatBox
 	spinner      spinner.Model
 	viewport     viewport.Model
+	permission   *permissionPrompt
 	entries      []transcriptEntry
 	pendingUsers []string
 	dirty        bool
+	followOutput bool
 	width        int
 	height       int
 	busy         bool
@@ -84,6 +88,8 @@ type model struct {
 	density      densityMode
 	status       string
 	styles       styles
+	broker       *PermissionBroker
+	streaming    int
 }
 
 type styles struct {
@@ -131,7 +137,8 @@ func (d densityMode) Label() string {
 	return "comfortable"
 }
 
-func newModel(ctx context.Context, sess *session.Session, events <-chan types.Event) model {
+func newModel(ctx context.Context, sess *session.Session, events <-chan types.Event,
+	broker *PermissionBroker) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
 
@@ -141,24 +148,24 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 			BorderBottom(true).
 			BorderForeground(lipgloss.Color("238")).
 			Padding(0, 1),
-		title:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")),
+		title:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")),
 		sessionID: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 		status: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("230")).
-			Background(lipgloss.Color("29")).
+			Foreground(lipgloss.Color("250")).
+			Background(lipgloss.Color("237")).
 			Padding(0, 1),
 		help:       lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 1),
-		userLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("45")).Bold(true),
-		agentLabel: lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
+		userLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("109")).Bold(true),
+		agentLabel: lipgloss.NewStyle().Foreground(lipgloss.Color("146")).Bold(true),
 		userBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("23")).
+			Background(lipgloss.Color("236")).
 			Padding(0, 1),
 		agentBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")).
 			BorderStyle(lipgloss.ThickBorder()).
 			BorderLeft(true).
-			BorderForeground(lipgloss.Color("212")).
+			BorderForeground(lipgloss.Color("103")).
 			PaddingLeft(1),
 		eventBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("246")).
@@ -174,19 +181,22 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 	)
 
 	return model{
-		ctx:      ctx,
-		session:  sess,
-		events:   events,
-		chatBox:  newChatBox(),
-		spinner:  spin,
-		viewport: vp,
-		density:  densityComfortable,
-		status:   "ready",
-		styles:   styles,
+		ctx:       ctx,
+		session:   sess,
+		events:    events,
+		chatBox:   newChatBox(),
+		spinner:   spin,
+		viewport:  vp,
+		density:   densityComfortable,
+		status:    "ready",
+		styles:    styles,
+		broker:    broker,
+		streaming: -1,
 		entries: []transcriptEntry{
 			{kind: transcriptEvent, text: styles.muted.Render("Started session " + sess.ID())},
 		},
-		dirty: true,
+		dirty:        true,
+		followOutput: true,
 	}
 }
 
@@ -203,9 +213,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.resize()
 	case tea.KeyPressMsg:
+		if m.permission != nil {
+			cmd := m.updatePermissionPrompt(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.syncViewport()
+			return m, tea.Batch(cmds...)
+		}
+
 		switch msg.Keystroke() {
 		case "ctrl+c", "esc":
 			return m, quitCmd()
+		case "pgup":
+			m.viewport.PageUp()
+			m.followOutput = false
+		case "pgdown":
+			m.viewport.PageDown()
+			m.followOutput = m.viewport.AtBottom()
+		case "ctrl+up", "ctrl+u":
+			m.viewport.HalfPageUp()
+			m.followOutput = false
+		case "ctrl+down", "ctrl+d":
+			m.viewport.HalfPageDown()
+			m.followOutput = m.viewport.AtBottom()
 		case "ctrl+o":
 			m.showEvents = !m.showEvents
 			m.dirty = true
@@ -268,10 +299,16 @@ func (m model) View() tea.View {
 	)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	help := m.styles.help.Render("enter send | shift+enter newline | ctrl+o events:" +
-		onOff(m.showEvents) + " | ctrl+t density:" + m.density.Label() + " | esc quit")
+		onOff(m.showEvents) + " | ctrl+t density:" + m.density.Label() +
+		" | pgup/pgdn scroll | esc quit")
 
 	body := m.viewport.View()
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body, m.chatBox.View(), help)
+	parts := []string{header, body}
+	if m.permission != nil {
+		parts = append(parts, m.permission.View())
+	}
+	parts = append(parts, m.chatBox.View(), help)
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	var view tea.View
 	view.SetContent(content)
@@ -284,7 +321,12 @@ func (m *model) resize() {
 	helpHeight := 1
 	m.chatBox.SetDensity(m.density)
 	m.chatBox.SetWidth(m.width)
-	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight)
+	permissionHeight := 0
+	if m.permission != nil {
+		m.permission.SetWidth(m.width)
+		permissionHeight = 6
+	}
+	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-permissionHeight)
 	viewportWidth := max(20, m.width)
 
 	m.viewport.SetWidth(viewportWidth)
@@ -315,6 +357,7 @@ func (m *model) submit() tea.Cmd {
 	m.pendingUsers = append(m.pendingUsers, text)
 	m.busy = true
 	m.showSpinner = true
+	m.followOutput = true
 	m.status = "thinking"
 	m.dirty = true
 
@@ -358,13 +401,21 @@ func (m *model) addEvent(event types.Event) {
 			}
 		}
 	case types.EventModelStarted:
+		if m.busy {
+			m.showSpinner = true
+		}
 		m.appendEvent(m.styles.muted.Render("agent started"))
+	case types.EventModelTextDelta:
+		if event.TextDelta != "" {
+			m.showSpinner = false
+			m.appendAgentDelta(event.TextDelta)
+		}
 	case types.EventModelMessageCompleted:
+		m.showSpinner = false
 		if event.Message != nil {
 			text := textFromContent(event.Message.Content)
 			if text != "" {
-				m.showSpinner = false
-				m.appendAgentMessage(text)
+				m.completeAgentMessage(text)
 			}
 			for _, call := range event.Message.ToolCalls {
 				m.appendEvent(m.styles.tool.Render("tool requested") + ": " +
@@ -388,11 +439,20 @@ func (m *model) addEvent(event types.Event) {
 		if event.Permission != nil {
 			m.appendEvent(m.styles.tool.Render("permission requested") + ": " +
 				event.Permission.Request.ToolName)
+			if m.broker != nil {
+				prompt := newPermissionPrompt(event.Permission.Request)
+				prompt.SetWidth(m.width)
+				m.permission = &prompt
+				m.status = "approval"
+				m.resize()
+			}
 		}
 	case types.EventPermissionGranted, types.EventPermissionDenied:
 		if event.Permission != nil {
 			m.appendEvent(m.styles.tool.Render(string(event.Kind)) + ": " +
 				event.Permission.Reason)
+			m.permission = nil
+			m.resize()
 		}
 	case types.EventSessionError:
 		if event.Error != "" {
@@ -439,6 +499,62 @@ func (m *model) appendAgentMessage(text string) {
 		kind: transcriptAgent,
 		text: text,
 	})
+	m.streaming = -1
+	m.dirty = true
+}
+
+func (m *model) appendAgentDelta(delta string) {
+	if m.streaming < 0 || m.streaming >= len(m.entries) {
+		m.entries = append(m.entries, transcriptEntry{
+			kind: transcriptAgent,
+			text: delta,
+		})
+		m.streaming = len(m.entries) - 1
+		m.dirty = true
+		return
+	}
+
+	m.entries[m.streaming].text += delta
+	m.dirty = true
+}
+
+func (m *model) completeAgentMessage(text string) {
+	if m.streaming >= 0 && m.streaming < len(m.entries) {
+		m.entries[m.streaming].text = text
+		m.streaming = -1
+		m.dirty = true
+		return
+	}
+
+	m.appendAgentMessage(text)
+}
+
+func (m *model) updatePermissionPrompt(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.Keystroke() {
+	case "ctrl+c":
+		return quitCmd()
+	case "esc":
+		m.resolvePermission(types.PermissionDecisionDeny, "denied from TUI")
+	case "enter":
+		m.resolvePermission(m.permission.Decision(), m.permission.Reason())
+	default:
+		updated := m.permission.Update(msg)
+		m.permission = &updated
+		m.dirty = true
+	}
+
+	return nil
+}
+
+func (m *model) resolvePermission(decision types.PermissionDecision, reason string) {
+	if m.permission == nil || m.broker == nil {
+		return
+	}
+
+	m.broker.Resolve(m.permission.request, decision, reason)
+	m.permission = nil
+	m.status = "thinking"
+	m.resize()
 	m.dirty = true
 }
 
@@ -446,8 +562,12 @@ func (m *model) syncViewport() {
 	if !m.dirty {
 		return
 	}
+	atBottom := m.viewport.AtBottom()
 	m.viewport.SetContent(m.renderTranscript())
-	m.viewport.GotoBottom()
+	if m.followOutput || atBottom {
+		m.viewport.GotoBottom()
+		m.followOutput = true
+	}
 	m.dirty = false
 }
 

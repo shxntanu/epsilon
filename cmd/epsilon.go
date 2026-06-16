@@ -29,6 +29,7 @@ type harnessConfig struct {
 	litellmBaseURL string
 	litellmAPIKey  string
 	allowAll       bool
+	broker         permissions.Broker
 }
 
 func main() {
@@ -206,9 +207,12 @@ func eventsCommand(ctx context.Context, args []string) error {
 }
 
 func newHarness(config harnessConfig) (*core.Harness, error) {
-	broker := permissions.Broker(promptBroker{})
+	broker := config.broker
 	if config.allowAll {
 		broker = permissions.NewAllowBroker()
+	}
+	if broker == nil {
+		broker = permissions.Broker(promptBroker{})
 	}
 
 	provider, err := newProvider(config)
@@ -283,6 +287,9 @@ func printEvent(w io.Writer, event types.Event) {
 					truncate(string(call.Input), 240))
 			}
 		}
+	}
+	if event.TextDelta != "" {
+		fmt.Fprintf(w, "      delta: %s\n", truncate(event.TextDelta, 240))
 	}
 	if event.ToolCall != nil {
 		fmt.Fprintf(w, "      tool_call %s(%s): %s\n", event.ToolCall.Name, event.ToolCall.ID,
