@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shxntanu/epsilon/core"
+	harnessconfig "github.com/shxntanu/epsilon/core/config"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/providers/fake"
@@ -19,17 +20,17 @@ import (
 	"github.com/shxntanu/epsilon/core/types"
 )
 
-const defaultSessionDir = ".epsilon/sessions"
-
 type harnessConfig struct {
-	sessionDir     string
-	workspace      string
-	provider       string
-	model          string
-	litellmBaseURL string
-	litellmAPIKey  string
-	allowAll       bool
-	broker         permissions.Broker
+	sessionDir      string
+	workspace       string
+	provider        string
+	model           string
+	litellmBaseURL  string
+	litellmAPIKey   string
+	eventBufferSize int
+	allowAll        bool
+	broker          permissions.Broker
+	configStore     *harnessconfig.Store
 }
 
 func main() {
@@ -64,14 +65,20 @@ func execute(ctx context.Context, args []string) error {
 }
 
 func runCommand(ctx context.Context, args []string) error {
+	configStore, defaults, err := loadHarnessConfig(args)
+	if err != nil {
+		return err
+	}
+
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	sessionDir := fs.String("session-dir", defaultSessionDir, "directory for persisted sessions")
-	workspace := fs.String("workspace", ".", "workspace root for file tools")
+	fs.String("config", harnessconfig.DefaultPath, "harness config file")
+	sessionDir := fs.String("session-dir", defaults.SessionDir, "directory for persisted sessions")
+	workspace := fs.String("workspace", defaults.Workspace, "workspace root for file tools")
 	allowAll := fs.Bool("y", false, "allow permission requests without prompting")
-	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", "fake"), "provider to use: fake or litellm")
-	model := fs.String("model", os.Getenv("LITELLM_MODEL"), "model name for LiteLLM")
-	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", "http://localhost:4000"), "LiteLLM proxy base URL")
+	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
+	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
+	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
 	litellmAPIKey := fs.String("litellm-api-key", os.Getenv("LITELLM_API_KEY"), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -83,13 +90,15 @@ func runCommand(ctx context.Context, args []string) error {
 	}
 
 	harness, err := newHarness(ctx, harnessConfig{
-		sessionDir:     *sessionDir,
-		workspace:      *workspace,
-		provider:       *provider,
-		model:          *model,
-		litellmBaseURL: *litellmBaseURL,
-		litellmAPIKey:  *litellmAPIKey,
-		allowAll:       *allowAll,
+		sessionDir:      *sessionDir,
+		workspace:       *workspace,
+		provider:        *provider,
+		model:           *model,
+		litellmBaseURL:  *litellmBaseURL,
+		litellmAPIKey:   *litellmAPIKey,
+		eventBufferSize: defaults.EventBufferSize,
+		allowAll:        *allowAll,
+		configStore:     configStore,
 	})
 	if err != nil {
 		return err
@@ -119,14 +128,20 @@ func runCommand(ctx context.Context, args []string) error {
 }
 
 func resumeCommand(ctx context.Context, args []string) error {
+	configStore, defaults, err := loadHarnessConfig(args)
+	if err != nil {
+		return err
+	}
+
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	sessionDir := fs.String("session-dir", defaultSessionDir, "directory for persisted sessions")
-	workspace := fs.String("workspace", ".", "workspace root for file tools")
+	fs.String("config", harnessconfig.DefaultPath, "harness config file")
+	sessionDir := fs.String("session-dir", defaults.SessionDir, "directory for persisted sessions")
+	workspace := fs.String("workspace", defaults.Workspace, "workspace root for file tools")
 	allowAll := fs.Bool("y", false, "allow permission requests without prompting")
-	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", "fake"), "provider to use: fake or litellm")
-	model := fs.String("model", os.Getenv("LITELLM_MODEL"), "model name for LiteLLM")
-	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", "http://localhost:4000"), "LiteLLM proxy base URL")
+	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
+	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
+	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
 	litellmAPIKey := fs.String("litellm-api-key", os.Getenv("LITELLM_API_KEY"), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -139,13 +154,15 @@ func resumeCommand(ctx context.Context, args []string) error {
 	sessionID := remaining[0]
 
 	harness, err := newHarness(ctx, harnessConfig{
-		sessionDir:     *sessionDir,
-		workspace:      *workspace,
-		provider:       *provider,
-		model:          *model,
-		litellmBaseURL: *litellmBaseURL,
-		litellmAPIKey:  *litellmAPIKey,
-		allowAll:       *allowAll,
+		sessionDir:      *sessionDir,
+		workspace:       *workspace,
+		provider:        *provider,
+		model:           *model,
+		litellmBaseURL:  *litellmBaseURL,
+		litellmAPIKey:   *litellmAPIKey,
+		eventBufferSize: defaults.EventBufferSize,
+		allowAll:        *allowAll,
+		configStore:     configStore,
 	})
 	if err != nil {
 		return err
@@ -178,9 +195,15 @@ func resumeCommand(ctx context.Context, args []string) error {
 }
 
 func eventsCommand(ctx context.Context, args []string) error {
+	_, defaults, err := loadHarnessConfig(args)
+	if err != nil {
+		return err
+	}
+
 	fs := flag.NewFlagSet("events", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	sessionDir := fs.String("session-dir", defaultSessionDir, "directory for persisted sessions")
+	fs.String("config", harnessconfig.DefaultPath, "harness config file")
+	sessionDir := fs.String("session-dir", defaults.SessionDir, "directory for persisted sessions")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -226,11 +249,32 @@ func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error
 		core.WithSessionDir(config.sessionDir),
 		core.WithPermissionBroker(broker),
 	}
+	if config.eventBufferSize > 0 {
+		options = append(options, core.WithEventBufferSize(config.eventBufferSize))
+	}
 	if modelInfo, ok := selectedModelInfoForProvider(ctx, provider); ok {
 		options = append(options, core.WithSelectedModelInfo(modelInfo))
 	}
 
-	return core.New(options...)
+	harness, err := core.New(options...)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.configStore != nil {
+		if err := config.configStore.SaveSessionDefaults(harnessconfig.Settings{
+			SessionDir:      config.sessionDir,
+			Workspace:       config.workspace,
+			Provider:        config.provider,
+			Model:           config.model,
+			LiteLLMBaseURL:  config.litellmBaseURL,
+			EventBufferSize: config.eventBufferSize,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	return harness, nil
 }
 
 func selectedModelInfoForProvider(ctx context.Context, provider types.Provider) (types.ModelInfo, bool) {
@@ -268,14 +312,39 @@ func newProvider(config harnessConfig) (types.Provider, error) {
 	case "", "fake":
 		return fake.New(), nil
 	case "litellm":
-		return litellm.New(litellm.Config{
+		provider, err := litellm.New(litellm.Config{
 			BaseURL: config.litellmBaseURL,
 			APIKey:  config.litellmAPIKey,
 			Model:   config.model,
 		})
+		if err != nil {
+			return nil, err
+		}
+		cacheKey := harnessconfig.ModelCatalogKey("litellm", config.litellmBaseURL)
+		return harnessconfig.WrapProvider(provider, config.configStore, cacheKey), nil
 	default:
 		return nil, fmt.Errorf("unknown provider %q", config.provider)
 	}
+}
+
+func loadHarnessConfig(args []string) (*harnessconfig.Store, harnessconfig.Settings, error) {
+	store, err := harnessconfig.LoadStore(configPathFromArgs(args))
+	if err != nil {
+		return nil, harnessconfig.Settings{}, err
+	}
+	return store, store.EffectiveSettings(), nil
+}
+
+func configPathFromArgs(args []string) string {
+	for i, arg := range args {
+		if arg == "-config" && i+1 < len(args) {
+			return args[i+1]
+		}
+		if value, ok := strings.CutPrefix(arg, "-config="); ok {
+			return value
+		}
+	}
+	return harnessconfig.DefaultPath
 }
 
 func messageFromArgs(args []string) (string, error) {
@@ -392,6 +461,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  -litellm-base-url http://localhost:4000")
 	fmt.Fprintln(w, "  -litellm-api-key <key>")
 	fmt.Fprintln(w, "  -model <model>")
+	fmt.Fprintln(w, "  -config .epsilon/config.json")
 }
 
 type promptBroker struct{}
