@@ -2,9 +2,11 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +14,11 @@ import (
 	"sync"
 
 	"github.com/shxntanu/epsilon/core/types"
+)
+
+const (
+	maxGrepLineBytes   = 1024 * 1024
+	maxGrepDisplayCols = 1200
 )
 
 // GrepTool searches files inside a workspace.
@@ -138,7 +145,7 @@ func (t *GrepTool) Run(ctx context.Context, input json.RawMessage) (*types.ToolR
 			}
 			if d.IsDir() {
 				// Avoid checking deep build/vcs configurations
-				if d.Name() == ".git" || d.Name() == "node_modules" || d.Name() == ".vendor" {
+				if shouldSkipGrepDir(d.Name()) {
 					return filepath.SkipDir
 				}
 				return nil
@@ -251,6 +258,15 @@ func sendSearchErr(errChan chan<- error, err error) {
 	}
 }
 
+func shouldSkipGrepDir(name string) bool {
+	switch name {
+	case ".git", ".cache", ".vendor", "node_modules", "vendor", "dist", "build", "target":
+		return true
+	default:
+		return false
+	}
+}
+
 // searchFile scans a single file line-by-line and extracts local context windows
 func searchFile(ctx context.Context, path string, displayPath string, re *regexp.Regexp,
 	contextLines int, matchChan chan<- Match) error {
@@ -260,20 +276,8 @@ func searchFile(ctx context.Context, path string, displayPath string, re *regexp
 	}
 	defer file.Close()
 
-	var lines []string
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		lines = append(lines, scanner.Text())
-		// Early check to skip unreadable binary files
-		if len(lines) > 5000 && isBinary(lines[0]) {
-			return nil
-		}
-	}
-	if err := scanner.Err(); err != nil {
+	lines, err := readGrepLines(ctx, file)
+	if err != nil {
 		return err
 	}
 
@@ -297,7 +301,8 @@ func searchFile(ctx context.Context, path string, displayPath string, re *regexp
 				if idx == i {
 					prefix = ">> " // Visual arrow highlighting the exact target line for the model
 				}
-				matchBuilder.WriteString(fmt.Sprintf("%s%d: %s\n", prefix, lineNumber, lines[idx]))
+				matchBuilder.WriteString(fmt.Sprintf("%s%d: %s\n", prefix, lineNumber,
+					truncateGrepLine(lines[idx])))
 			}
 
 			select {
@@ -312,6 +317,74 @@ func searchFile(ctx context.Context, path string, displayPath string, re *regexp
 	}
 
 	return nil
+}
+
+func readGrepLines(ctx context.Context, file *os.File) ([]string, error) {
+	reader := bufio.NewReaderSize(file, 64*1024)
+	lines := make([]string, 0)
+	var lineBuilder strings.Builder
+	lineTruncated := false
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		fragment, err := reader.ReadSlice('\n')
+		if bytes.Contains(fragment, []byte{0}) {
+			return nil, nil
+		}
+		if len(fragment) > 0 {
+			remaining := maxGrepLineBytes - lineBuilder.Len()
+			if remaining > 0 {
+				if len(fragment) > remaining {
+					lineBuilder.Write(fragment[:remaining])
+					lineTruncated = true
+				} else {
+					lineBuilder.Write(fragment)
+				}
+			} else {
+				lineTruncated = true
+			}
+		}
+
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		if lineBuilder.Len() > 0 {
+			line := strings.TrimRight(lineBuilder.String(), "\r\n")
+			if lineTruncated {
+				line += " [line truncated]"
+			}
+			lines = append(lines, line)
+			lineBuilder.Reset()
+			lineTruncated = false
+		}
+		if err == io.EOF {
+			break
+		}
+	}
+
+	return lines, nil
+}
+
+func truncateGrepLine(line string) string {
+	if len(line) <= maxGrepDisplayCols {
+		return line
+	}
+
+	cols := 0
+	for idx := range line {
+		if cols >= maxGrepDisplayCols {
+			return line[:idx] + " ... [line truncated]"
+		}
+		cols++
+	}
+
+	return line
 }
 
 func isBinary(firstLine string) bool {

@@ -87,12 +87,16 @@ type model struct {
 }
 
 type styles struct {
+	header     lipgloss.Style
 	title      lipgloss.Style
+	sessionID  lipgloss.Style
 	status     lipgloss.Style
 	help       lipgloss.Style
-	user       lipgloss.Style
-	userBubble lipgloss.Style
-	model      lipgloss.Style
+	userLabel  lipgloss.Style
+	agentLabel lipgloss.Style
+	userBlock  lipgloss.Style
+	agentBlock lipgloss.Style
+	eventBlock lipgloss.Style
 	tool       lipgloss.Style
 	error      lipgloss.Style
 	muted      lipgloss.Style
@@ -132,15 +136,37 @@ func newModel(ctx context.Context, sess *session.Session, events <-chan types.Ev
 	vp.SoftWrap = true
 
 	styles := styles{
-		title:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")),
-		status:     lipgloss.NewStyle().Foreground(lipgloss.Color("86")),
-		help:       lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
-		user:       lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
-		userBubble: lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("236")).Padding(0, 1),
-		model:      lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
-		tool:       lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Bold(true),
-		error:      lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
-		muted:      lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		header: lipgloss.NewStyle().
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderBottom(true).
+			BorderForeground(lipgloss.Color("238")).
+			Padding(0, 1),
+		title:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")),
+		sessionID: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		status: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("230")).
+			Background(lipgloss.Color("29")).
+			Padding(0, 1),
+		help:       lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 1),
+		userLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("45")).Bold(true),
+		agentLabel: lipgloss.NewStyle().Foreground(lipgloss.Color("212")).Bold(true),
+		userBlock: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Background(lipgloss.Color("23")).
+			Padding(0, 1),
+		agentBlock: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			BorderStyle(lipgloss.ThickBorder()).
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("212")).
+			PaddingLeft(1),
+		eventBlock: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("246")).
+			Background(lipgloss.Color("235")).
+			Padding(0, 1),
+		tool:  lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Bold(true),
+		error: lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
+		muted: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 	}
 	spin := spinner.New(
 		spinner.WithSpinner(spinner.Dot),
@@ -232,9 +258,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() tea.View {
-	header := m.styles.title.Render("epsilon") + " " +
-		m.styles.muted.Render(m.session.ID()) + " " +
-		m.styles.status.Render(m.status)
+	headerText := lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		m.styles.title.Render("epsilon"),
+		" ",
+		m.styles.sessionID.Render(m.session.ID()),
+		" ",
+		m.styles.status.Render(m.status),
+	)
+	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	help := m.styles.help.Render("enter send | shift+enter newline | ctrl+o events:" +
 		onOff(m.showEvents) + " | ctrl+t density:" + m.density.Label() + " | esc quit")
 
@@ -248,7 +280,7 @@ func (m model) View() tea.View {
 }
 
 func (m *model) resize() {
-	headerHeight := 1
+	headerHeight := 2
 	helpHeight := 1
 	m.chatBox.SetDensity(m.density)
 	m.chatBox.SetWidth(m.width)
@@ -326,7 +358,7 @@ func (m *model) addEvent(event types.Event) {
 			}
 		}
 	case types.EventModelStarted:
-		m.appendEvent(m.styles.muted.Render("model started"))
+		m.appendEvent(m.styles.muted.Render("agent started"))
 	case types.EventModelMessageCompleted:
 		if event.Message != nil {
 			text := textFromContent(event.Message.Content)
@@ -448,35 +480,62 @@ func (m model) renderTranscriptEntry(entry transcriptEntry) (string, bool) {
 		if !m.showEvents {
 			return "", false
 		}
-		return entry.text, true
+		return m.renderEvent(entry.text), true
 	default:
 		return entry.text, true
 	}
 }
 
 func (m model) renderAgentMessage(text string) string {
-	label := m.styles.model.Render("agent")
+	label := m.styles.agentLabel.Render("Agent")
 	if m.density == densityCompact {
-		return label + ": " + text
+		return label + " " + m.styles.muted.Render("-") + " " + strings.TrimSpace(text)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, label, text)
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		label,
+		m.styles.agentBlock.Width(m.messageWidth()).Render(strings.TrimSpace(text)),
+	)
 }
 
 func (m model) renderSpinnerMessage() string {
-	label := m.styles.model.Render("agent")
+	label := m.styles.agentLabel.Render("Agent")
 	responding := m.spinner.View() + " " + m.styles.muted.Render("responding")
 	if m.density == densityCompact {
-		return label + ": " + responding
+		return label + " " + m.styles.muted.Render("-") + " " + responding
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, label, responding)
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		label,
+		m.styles.agentBlock.Width(m.messageWidth()).Render(responding),
+	)
 }
 
 func (m model) renderUserMessage(text string) string {
-	message := strings.Join(prefixLines(strings.Split(text, "\n"), "> ", "  "), "\n")
-	width := max(20, m.viewport.Width())
-	return m.styles.userBubble.Width(width).Render(message)
+	message := strings.TrimSpace(text)
+	if m.density == densityCompact {
+		return m.styles.userLabel.Render("You") + " " + m.styles.muted.Render("-") + " " + message
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		m.styles.userLabel.Render("You"),
+		m.styles.userBlock.Width(m.messageWidth()).Render(message),
+	)
+}
+
+func (m model) renderEvent(text string) string {
+	if m.density == densityCompact {
+		return m.styles.muted.Render(text)
+	}
+
+	return m.styles.eventBlock.Width(m.messageWidth()).Render(text)
+}
+
+func (m model) messageWidth() int {
+	return max(20, m.viewport.Width()-2)
 }
 
 func (m model) entrySeparator() string {
@@ -485,19 +544,6 @@ func (m model) entrySeparator() string {
 	}
 
 	return "\n\n"
-}
-
-func prefixLines(lines []string, firstPrefix string, restPrefix string) []string {
-	prefixed := make([]string, 0, len(lines))
-	for i, line := range lines {
-		prefix := restPrefix
-		if i == 0 {
-			prefix = firstPrefix
-		}
-		prefixed = append(prefixed, prefix+line)
-	}
-
-	return prefixed
 }
 
 func quitCmd() tea.Cmd {

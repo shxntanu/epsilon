@@ -21,18 +21,27 @@ type chatBox struct {
 
 func newChatBox() chatBox {
 	input := textarea.New()
-	input.Placeholder = "Ask epsilon..."
+	input.Placeholder = "Message epsilon..."
 	input.Prompt = ""
 	input.ShowLineNumbers = false
 	input.EndOfBufferCharacter = ' '
 	input.SetHeight(comfortableChatBoxInputHeight)
 	input.Focus()
 
+	styles := textarea.DefaultDarkStyles()
+	styles.Focused.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	styles.Focused.CursorLine = lipgloss.NewStyle().Background(lipgloss.Color("235"))
+	styles.Focused.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
+	styles.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(lipgloss.Color("235"))
+	styles.Cursor.Color = lipgloss.Color("212")
+	input.SetStyles(styles)
+
 	return chatBox{
 		input: input,
 		style: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("238")).
+			BorderForeground(lipgloss.Color("63")).
+			Foreground(lipgloss.Color("252")).
 			Padding(0, 1),
 	}
 }

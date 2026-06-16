@@ -18,6 +18,15 @@ func New() *Provider {
 
 func (p *Provider) Respond(ctx context.Context,
 	req types.ModelRequest) (*types.ModelResponse, error) {
+	if len(req.Messages) > 0 {
+		last := req.Messages[len(req.Messages)-1]
+		if last.Role == types.RoleTool {
+			return &types.ModelResponse{
+				Message: types.AssistantMessage("Tool result: " + textFromContent(last.Content)),
+			}, nil
+		}
+	}
+
 	for i := len(req.Messages) - 1; i >= 0; i-- {
 		msg := req.Messages[i]
 		if msg.Role == types.RoleUser && len(msg.Content) > 0 {
@@ -80,6 +89,21 @@ func toolMessageFromPrompt(prompt string) (types.Message, error) {
 	default:
 		return types.Message{}, fmt.Errorf("unknown fake tool command: %q", name)
 	}
+}
+
+func textFromContent(content []types.ContentPart) string {
+	var b strings.Builder
+	for _, part := range content {
+		if part.Kind != types.ContentText {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(part.Text)
+	}
+
+	return b.String()
 }
 
 func readToolInputFromPrompt(prompt string) (json.RawMessage, error) {

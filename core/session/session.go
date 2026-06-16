@@ -19,6 +19,8 @@ var (
 	ErrProviderMissing    = errors.New("provider missing")
 )
 
+const defaultMaxAgentTurns = 20
+
 type Session struct {
 	id       string
 	bus      *events.Bus
@@ -167,64 +169,78 @@ func (s *Session) Close(ctx context.Context) error {
 }
 
 func (s *Session) Step(ctx context.Context) error {
-	s.mu.Lock()
-	if s.closed {
+	for turn := 0; turn < defaultMaxAgentTurns; turn++ {
+		messages, provider, toolRegistry, err := s.modelRequestState()
+		if err != nil {
+			return err
+		}
+
+		var toolDefs []types.ToolDefinition
+		if toolRegistry != nil {
+			toolDefs = toolRegistry.Definitions()
+		}
+
+		if _, err := s.bus.Publish(ctx, types.Event{
+			Kind:      types.EventModelStarted,
+			CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			return fmt.Errorf("publish model started event: %w", err)
+		}
+
+		resp, err := provider.Respond(ctx, types.ModelRequest{
+			Messages: messages,
+			Tools:    toolDefs,
+		})
+		if err != nil {
+			_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
+			return fmt.Errorf("provider respond: %w", err)
+		}
+
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return ErrClosed
+		}
+		s.messages = append(s.messages, resp.Message)
 		s.mu.Unlock()
-		return ErrClosed
-	}
-	if s.provider == nil {
-		s.mu.Unlock()
-		return ErrProviderMissing
-	}
 
-	messages := make([]types.Message, len(s.messages))
-	copy(messages, s.messages)
-	provider := s.provider
-	toolRegistry := s.tools
-	s.mu.Unlock()
+		if _, err = s.bus.Publish(ctx, types.Event{
+			Kind:      types.EventModelMessageCompleted,
+			CreatedAt: time.Now().UTC(),
+			Message:   &resp.Message,
+		}); err != nil {
+			return fmt.Errorf("publish model completed event: %w", err)
+		}
 
-	var toolDefs []types.ToolDefinition
-	if toolRegistry != nil {
-		toolDefs = toolRegistry.Definitions()
-	}
-
-	_, err := s.bus.Publish(ctx, types.Event{
-		Kind:      types.EventModelStarted,
-		CreatedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		return fmt.Errorf("publish model started event: %w", err)
-	}
-
-	resp, err := provider.Respond(ctx, types.ModelRequest{
-		Messages: messages,
-		Tools:    toolDefs,
-	})
-	if err != nil {
-		_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
-		return fmt.Errorf("provider respond: %w", err)
-	}
-
-	s.mu.Lock()
-	s.messages = append(s.messages, resp.Message)
-	s.mu.Unlock()
-
-	_, err = s.bus.Publish(ctx, types.Event{
-		Kind:      types.EventModelMessageCompleted,
-		CreatedAt: time.Now().UTC(),
-		Message:   &resp.Message,
-	})
-	if err != nil {
-		return fmt.Errorf("publish model completed event: %w", err)
-	}
-
-	if len(resp.Message.ToolCalls) > 0 {
+		if len(resp.Message.ToolCalls) == 0 {
+			return nil
+		}
 		if err := s.executeToolCalls(ctx, resp.Message.ToolCalls, toolRegistry); err != nil {
 			return err
 		}
 	}
 
-	return nil
+	err := fmt.Errorf("agent step reached tool-call limit after %d model turns",
+		defaultMaxAgentTurns)
+	_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
+	return err
+}
+
+func (s *Session) modelRequestState() ([]types.Message, types.Provider, *tools.Registry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil, nil, nil, ErrClosed
+	}
+	if s.provider == nil {
+		return nil, nil, nil, ErrProviderMissing
+	}
+
+	messages := make([]types.Message, len(s.messages))
+	copy(messages, s.messages)
+
+	return messages, s.provider, s.tools, nil
 }
 
 func (s *Session) executeToolCalls(ctx context.Context, calls []types.ToolCall,
