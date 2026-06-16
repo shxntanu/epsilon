@@ -70,6 +70,8 @@ type stepDoneMsg struct {
 	err error
 }
 
+const bottomGutterHeight = 1
+
 type model struct {
 	ctx          context.Context
 	session      *session.Session
@@ -364,6 +366,7 @@ func (m model) View() tea.View {
 	help := m.styles.help.Render("enter send | shift+enter newline | ctrl+o events:" +
 		onOff(m.showEvents) + " | ctrl+t density:" + m.density.Label() +
 		" | pgup/pgdn scroll | esc quit")
+	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
 
 	body := m.viewport.View()
 	parts := []string{header, body}
@@ -373,7 +376,7 @@ func (m model) View() tea.View {
 	if selector, ok := m.renderSlashSelector(); ok {
 		parts = append(parts, selector)
 	}
-	parts = append(parts, m.chatBox.View(), help)
+	parts = append(parts, m.chatBox.View(), help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	var view tea.View
@@ -395,7 +398,7 @@ func (m *model) resize() {
 	}
 	selectorHeight := m.slashSelectorHeight()
 	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-
-		permissionHeight-selectorHeight)
+		permissionHeight-selectorHeight-bottomGutterHeight)
 	viewportWidth := max(20, m.width)
 
 	m.viewport.SetWidth(viewportWidth)

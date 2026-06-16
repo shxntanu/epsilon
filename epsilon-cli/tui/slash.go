@@ -127,9 +127,9 @@ func (m model) slashSelectorHeight() int {
 		return 0
 	}
 	if len(matches) == 0 {
-		return 3
+		return 4
 	}
-	return min(len(matches)+1, maxSlashSelectorMatches+1)
+	return len(matches) + 3
 }
 
 func (m model) renderSlashSelector() (string, bool) {
