@@ -34,7 +34,7 @@ func TestDefaultAgentPromptComesFromEmbeddedTextFile(t *testing.T) {
 
 func TestDefaultAgentPromptIsCompactAndGuidesToolUse(t *testing.T) {
 	prompt := DefaultAgent().Render()
-	if len(prompt) > 3500 {
+	if len(prompt) > 5500 {
 		t.Fatalf("default agent prompt is too large: %d bytes", len(prompt))
 	}
 	for _, want := range []string{

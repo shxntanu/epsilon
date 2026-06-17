@@ -196,12 +196,17 @@ func WithDefaultTools(workspaceRoot string) Option {
 			return fmt.Errorf("create git_diff tool: %w", err)
 		}
 
+		bashTool, err := tools.NewBashTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create bash tool: %w", err)
+		}
+
 		patchTool, err := tools.NewPatchTool(workspaceRoot)
 		if err != nil {
 			return fmt.Errorf("create apply_patch tool: %w", err)
 		}
 
 		return WithTools(readFileTool, writeFileTool, grepTool, listDirTool,
-			fileTreeTool, gitStatusTool, gitDiffTool, patchTool)(h)
+			fileTreeTool, gitStatusTool, gitDiffTool, bashTool, patchTool)(h)
 	}
 }
