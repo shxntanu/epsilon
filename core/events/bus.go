@@ -70,6 +70,16 @@ func NewBusFromHistory(sessionID string, bufferSize int, store Store, history []
 
 // Subscribe registers a new event subscriber.
 func (b *Bus) Subscribe() (*Subscription, error) {
+	return b.subscribe(true)
+}
+
+// SubscribeLive registers a subscriber that only receives events published
+// after the subscription is created.
+func (b *Bus) SubscribeLive() (*Subscription, error) {
+	return b.subscribe(false)
+}
+
+func (b *Bus) subscribe(includeHistory bool) (*Subscription, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -80,8 +90,10 @@ func (b *Bus) Subscribe() (*Subscription, error) {
 	b.nextSubID++
 	id := b.nextSubID
 	ch := make(chan types.Event, len(b.history)+b.bufferSize)
-	for _, event := range b.history {
-		ch <- event
+	if includeHistory {
+		for _, event := range b.history {
+			ch <- event
+		}
 	}
 	b.subscribers[id] = ch
 
@@ -90,6 +102,16 @@ func (b *Bus) Subscribe() (*Subscription, error) {
 		id:     id,
 		events: ch,
 	}, nil
+}
+
+// History returns a snapshot of the bus history in publish order.
+func (b *Bus) History() []types.Event {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	history := make([]types.Event, len(b.history))
+	copy(history, b.history)
+	return history
 }
 
 // Publish stamps an event and broadcasts it to every current subscriber.

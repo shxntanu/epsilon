@@ -1,0 +1,80 @@
+package tui
+
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/shxntanu/epsilon/core/types"
+)
+
+func TestHydrateTranscriptEntriesBuildsMessagesWithoutReplay(t *testing.T) {
+	history := []types.Event{
+		types.NewUserMessageAddedEvent(time.Now().UTC(), types.UserMessage("hello")),
+		{
+			Kind:      types.EventModelMessageCompleted,
+			CreatedAt: time.Now().UTC(),
+			Message:   &types.Message{Role: types.RoleAssistant, Content: []types.ContentPart{types.TextPart("hi there")}},
+		},
+	}
+
+	entries := hydrateTranscriptEntries(history)
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	if entries[0].kind != transcriptUser || entries[0].text != "hello" {
+		t.Fatalf("first entry = %#v, want user hello", entries[0])
+	}
+	if entries[1].kind != transcriptAgent || entries[1].text != "hi there" {
+		t.Fatalf("second entry = %#v, want agent hi there", entries[1])
+	}
+}
+
+func TestHydrateTranscriptEntriesPreservesCompletedToolState(t *testing.T) {
+	call := types.ToolCall{ID: "call_123", Name: "read_file"}
+	history := []types.Event{
+		{
+			Kind:      types.EventModelMessageCompleted,
+			CreatedAt: time.Now().UTC(),
+			Message:   &types.Message{Role: types.RoleAssistant, ToolCalls: []types.ToolCall{call}},
+		},
+		types.NewToolCallCompletedEvent(time.Now().UTC(), call, types.TextToolResult("README contents")),
+	}
+
+	entries := hydrateTranscriptEntries(history)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if entries[0].kind != transcriptTool {
+		t.Fatalf("entry kind = %v, want transcriptTool", entries[0].kind)
+	}
+	if !strings.Contains(entries[0].text, "Used read_file") {
+		t.Fatalf("tool text = %q, want completed tool text", entries[0].text)
+	}
+	if entries[0].toolResult != "README contents" {
+		t.Fatalf("tool result = %q, want README contents", entries[0].toolResult)
+	}
+}
+
+func TestHydrateTranscriptEntriesHandlesPermissionHistory(t *testing.T) {
+	history := []types.Event{
+		types.NewPermissionRequestedEvent(time.Now().UTC(), types.PermissionRequest{ToolName: "read_file"}),
+		types.NewPermissionGrantedEvent(time.Now().UTC(), types.PermissionResult{Reason: "allowed"}),
+		types.NewSessionErrorEvent(time.Now().UTC(), errors.New("boom")),
+	}
+
+	entries := hydrateTranscriptEntries(history)
+	if len(entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(entries))
+	}
+	if entries[0].kind != transcriptStatus || !strings.Contains(entries[0].text, "Waiting for approval to use read_file") {
+		t.Fatalf("first entry = %#v, want permission status", entries[0])
+	}
+	if entries[1].kind != transcriptStatus || !strings.Contains(entries[1].text, "permission granted: allowed") {
+		t.Fatalf("second entry = %#v, want granted status", entries[1])
+	}
+	if entries[2].kind != transcriptPlain || !strings.Contains(entries[2].text, "session error: boom") {
+		t.Fatalf("third entry = %#v, want session error", entries[2])
+	}
+}

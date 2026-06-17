@@ -34,12 +34,16 @@ func Start(ctx context.Context, config Config) error {
 		return fmt.Errorf("harness is nil")
 	}
 
-	sess, err := startOrResume(ctx, config)
+	sess, resumed, err := startOrResume(ctx, config)
 	if err != nil {
 		return err
 	}
 
-	sub, err := sess.Subscribe()
+	subscribe := sess.Subscribe
+	if resumed {
+		subscribe = sess.SubscribeLive
+	}
+	sub, err := subscribe()
 	if err != nil {
 		return err
 	}
@@ -54,12 +58,16 @@ func Start(ctx context.Context, config Config) error {
 	selectedModel := func() (types.ModelInfo, bool) {
 		return config.Harness.CachedSelectedModelInfo()
 	}
+	initialHistory := []types.Event(nil)
+	if resumed {
+		initialHistory = sess.History()
+	}
 	program := tea.NewProgram(newModel(ctx, sess, sub, config.PermissionBroker,
 		config.Harness.SlashCommands(), contextSummary, selectedModel,
 		config.Harness.ListModels, config.Harness.ListSessions, config.Harness.ResumeSession,
 		config.Harness.CurrentModel, config.Harness.CurrentEffort,
 		config.Harness.SetModel, config.Harness.SetEffort,
-		config.Harness.RenameSession),
+		config.Harness.RenameSession, initialHistory),
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -71,12 +79,14 @@ func Start(ctx context.Context, config Config) error {
 	return nil
 }
 
-func startOrResume(ctx context.Context, config Config) (*session.Session, error) {
+func startOrResume(ctx context.Context, config Config) (*session.Session, bool, error) {
 	if strings.TrimSpace(config.SessionID) == "" {
-		return config.Harness.StartSession(ctx)
+		sess, err := config.Harness.StartSession(ctx)
+		return sess, false, err
 	}
 
-	return config.Harness.ResumeSession(ctx, config.SessionID)
+	sess, err := config.Harness.ResumeSession(ctx, config.SessionID)
+	return sess, true, err
 }
 
 type eventMsg types.Event
@@ -97,6 +107,7 @@ type sessionListMsg struct {
 type resumeSessionMsg struct {
 	sessionID string
 	title     string
+	history   []types.Event
 	session   *session.Session
 	sub       *events.Subscription
 	err       error
@@ -137,6 +148,7 @@ type model struct {
 	showSpinner   bool
 	showEvents    bool
 	showContext   bool
+	mouseCapture  bool
 	density       densityMode
 	status        string
 	sessionTitle  string
@@ -220,7 +232,8 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	resumeSession func(context.Context, string) (*session.Session, error),
 	currentModel func() string, currentEffort func() string,
 	setModel func(context.Context, string) error, setEffort func(string) error,
-	renameSession func(context.Context, string, string) (bool, error)) model {
+	renameSession func(context.Context, string, string) (bool, error),
+	initialHistory []types.Event) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
 	if slashRegistry == nil {
@@ -336,6 +349,13 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		eventStream = sub.Events()
 	}
 
+	entries := []transcriptEntry{
+		{kind: transcriptEvent, text: "Started session " + sess.ID()},
+	}
+	if len(initialHistory) > 0 {
+		entries = hydrateTranscriptEntries(initialHistory)
+	}
+
 	return model{
 		ctx:           ctx,
 		session:       sess,
@@ -355,15 +375,14 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		setModel:      setModel,
 		setEffort:     setEffort,
 		renameSession: renameSession,
+		mouseCapture:  false,
 		density:       densityComfortable,
 		status:        "ready",
 		sessionTitle:  "",
 		styles:        styles,
 		broker:        broker,
 		streaming:     -1,
-		entries: []transcriptEntry{
-			{kind: transcriptEvent, text: styles.muted.Render("Started session " + sess.ID())},
-		},
+		entries:      entries,
 		dirty:        true,
 		followOutput: true,
 	}
@@ -465,6 +484,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitArmed = false
 			m.showContext = !m.showContext
 			m.resize()
+		case "ctrl+g":
+			m.quitArmed = false
+			m.mouseCapture = !m.mouseCapture
+			if m.mouseCapture {
+				m.status = "mouse:scroll"
+			} else {
+				m.status = "mouse:select"
+			}
+			m.dirty = true
 		case "ctrl+t":
 			m.quitArmed = false
 			m.toggleDensity()
@@ -553,7 +581,8 @@ func (m model) View() tea.View {
 	)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	help := m.styles.help.Render("ctrl+o details:" + onOff(m.showEvents) +
-		" | ctrl+x context:" + onOff(m.showContext) + " | ctrl+c twice quit")
+		" | ctrl+x context:" + onOff(m.showContext) +
+		" | ctrl+g mouse:" + m.mouseLabel() + " | ctrl+c twice quit")
 	contextLine := m.renderContextWidget()
 	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
 
@@ -586,7 +615,7 @@ func (m model) View() tea.View {
 	view.SetContent(content)
 	view.BackgroundColor = tuiBackgroundColor
 	view.AltScreen = true
-	view.MouseMode = tea.MouseModeCellMotion
+	view.MouseMode = m.currentMouseMode()
 	return view
 }
 
@@ -602,6 +631,20 @@ func (m model) renderStatusBadge() string {
 		return m.styles.statusReady.Render("Ready")
 	}
 	return m.styles.status.Render(m.status)
+}
+
+func (m model) currentMouseMode() tea.MouseMode {
+	if m.mouseCapture {
+		return tea.MouseModeCellMotion
+	}
+	return tea.MouseModeNone
+}
+
+func (m model) mouseLabel() string {
+	if m.mouseCapture {
+		return "scroll"
+	}
+	return "select"
 }
 
 func (m *model) resize() {
@@ -731,6 +774,10 @@ func (m model) waitForEvent() tea.Cmd {
 }
 
 func (m *model) addEvent(event types.Event) {
+	m.applyEvent(event, true)
+}
+
+func (m *model) applyEvent(event types.Event, interactive bool) {
 	switch event.Kind {
 	case types.EventUserMessageAdded:
 		if event.Message != nil {
@@ -777,7 +824,7 @@ func (m *model) addEvent(event types.Event) {
 	case types.EventPermissionRequested:
 		if event.Permission != nil {
 			m.appendStatus("Waiting for approval to use " + event.Permission.Request.ToolName)
-			if m.broker != nil {
+			if interactive && m.broker != nil {
 				prompt := newPermissionPrompt(event.Permission.Request)
 				prompt.SetWidth(m.width)
 				m.permission = &prompt
@@ -789,14 +836,27 @@ func (m *model) addEvent(event types.Event) {
 		if event.Permission != nil {
 			m.appendStatus(strings.ReplaceAll(string(event.Kind), "_", " ") + ": " +
 				event.Permission.Reason)
-			m.permission = nil
-			m.resize()
+			if interactive {
+				m.permission = nil
+				m.resize()
+			}
 		}
 	case types.EventSessionError:
 		if event.Error != "" {
 			m.appendPlain(m.styles.error.Render("session error: " + event.Error))
 		}
 	}
+}
+
+func hydrateTranscriptEntries(history []types.Event) []transcriptEntry {
+	rehydrated := model{streaming: -1}
+	for _, event := range history {
+		rehydrated.applyEvent(event, false)
+	}
+	rehydrated.streaming = -1
+	rehydrated.showSpinner = false
+	rehydrated.busy = false
+	return rehydrated.entries
 }
 
 func (m *model) appendPlain(line string) {

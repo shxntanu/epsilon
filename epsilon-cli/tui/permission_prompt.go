@@ -12,7 +12,7 @@ import (
 
 type permissionPrompt struct {
 	request types.PermissionRequest
-	allow   bool
+	choice  int
 	width   int
 	styles  permissionPromptStyles
 }
@@ -29,7 +29,7 @@ type permissionPromptStyles struct {
 func newPermissionPrompt(request types.PermissionRequest) permissionPrompt {
 	return permissionPrompt{
 		request: request,
-		allow:   true,
+		choice:  0,
 		styles: permissionPromptStyles{
 			box: lipgloss.NewStyle().
 				Background(tuiBackground).
@@ -60,26 +60,32 @@ func newPermissionPrompt(request types.PermissionRequest) permissionPrompt {
 
 func (p permissionPrompt) Update(msg tea.KeyPressMsg) permissionPrompt {
 	switch msg.Keystroke() {
-	case "left", "right", "up", "down", "tab", "shift+tab":
-		p.allow = !p.allow
+	case "left", "up", "shift+tab":
+		p.choice = (p.choice + 2) % 3
+	case "right", "down", "tab":
+		p.choice = (p.choice + 1) % 3
 	}
 
 	return p
 }
 
 func (p permissionPrompt) Decision() types.PermissionDecision {
-	if p.allow {
+	switch p.choice {
+	case 0:
 		return types.PermissionDecisionAllow
+	case 1:
+		return types.PermissionDecisionAllowSession
 	}
-
 	return types.PermissionDecisionDeny
 }
 
 func (p permissionPrompt) Reason() string {
-	if p.allow {
+	switch p.choice {
+	case 0:
 		return "allowed from TUI"
+	case 1:
+		return "allowed for this session from TUI"
 	}
-
 	return "denied from TUI"
 }
 
@@ -88,12 +94,13 @@ func (p *permissionPrompt) SetWidth(width int) {
 }
 
 func (p permissionPrompt) View() string {
-	allow := p.styles.option.Render("Allow")
-	deny := p.styles.option.Render("Deny")
-	if p.allow {
-		allow = p.styles.selected.Render("Allow")
-	} else {
-		deny = p.styles.selected.Render("Deny")
+	options := []string{"Allow once", "Allow session", "Deny"}
+	rendered := make([]string, len(options))
+	for i, option := range options {
+		rendered[i] = p.styles.option.Render(option)
+		if p.choice == i {
+			rendered[i] = p.styles.selected.Render(option)
+		}
 	}
 
 	input := strings.TrimSpace(string(p.request.Input))
@@ -109,7 +116,7 @@ func (p permissionPrompt) View() string {
 		p.styles.title.Render("Approve tool call?"),
 		p.styles.body.Render(p.request.ToolName),
 		p.styles.muted.Render(input),
-		lipgloss.JoinHorizontal(lipgloss.Left, allow, " ", deny),
+		lipgloss.JoinHorizontal(lipgloss.Left, rendered[0], " ", rendered[1], " ", rendered[2]),
 		p.styles.muted.Render("arrows choose | enter confirm | esc deny"),
 	)
 

@@ -20,6 +20,9 @@ type PermissionDecision string
 const (
 	// PermissionDecisionAllow allows the requested action.
 	PermissionDecisionAllow PermissionDecision = "allow"
+	// PermissionDecisionAllowSession allows the requested action for the rest
+	// of the current session.
+	PermissionDecisionAllowSession PermissionDecision = "allow_session"
 	// PermissionDecisionDeny denies the requested action.
 	PermissionDecisionDeny PermissionDecision = "deny"
 )

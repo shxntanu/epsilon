@@ -12,6 +12,12 @@ type Broker interface {
 	Decide(ctx context.Context, request types.PermissionRequest) (types.PermissionResult, error)
 }
 
+// CachedBroker can return a previously granted or denied decision without
+// requiring an interactive prompt.
+type CachedBroker interface {
+	CachedDecision(request types.PermissionRequest) (types.PermissionResult, bool)
+}
+
 // StaticBroker returns the same decision for every request.
 type StaticBroker struct {
 	decision types.PermissionDecision

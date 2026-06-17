@@ -10,17 +10,33 @@ import (
 
 // PermissionBroker lets the TUI resolve permission requests from the Bubble Tea loop.
 type PermissionBroker struct {
-	mu        sync.Mutex
-	waiters   map[string]chan types.PermissionResult
-	decisions map[string]types.PermissionResult
+	mu             sync.Mutex
+	waiters        map[string]chan types.PermissionResult
+	decisions      map[string]types.PermissionResult
+	sessionAllows  map[string]types.PermissionResult
 }
 
 // NewPermissionBroker returns an interactive broker for TUI sessions.
 func NewPermissionBroker() *PermissionBroker {
 	return &PermissionBroker{
-		waiters:   make(map[string]chan types.PermissionResult),
-		decisions: make(map[string]types.PermissionResult),
+		waiters:       make(map[string]chan types.PermissionResult),
+		decisions:     make(map[string]types.PermissionResult),
+		sessionAllows: make(map[string]types.PermissionResult),
 	}
+}
+
+// CachedDecision returns a session-scoped approval when one has already been
+// granted for the requested tool.
+func (b *PermissionBroker) CachedDecision(request types.PermissionRequest) (types.PermissionResult, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	result, ok := b.sessionAllows[permissionSessionToolKey(request)]
+	if !ok {
+		return types.PermissionResult{}, false
+	}
+	result.Request = request
+	return result, true
 }
 
 // Decide blocks until the TUI resolves the permission request or ctx is cancelled.
@@ -60,6 +76,9 @@ func (b *PermissionBroker) Resolve(request types.PermissionRequest,
 	key := permissionKey(request)
 
 	b.mu.Lock()
+	if decision == types.PermissionDecisionAllowSession {
+		b.sessionAllows[permissionSessionToolKey(request)] = result
+	}
 	waiter, ok := b.waiters[key]
 	if ok {
 		delete(b.waiters, key)
@@ -80,4 +99,8 @@ func permissionKey(request types.PermissionRequest) string {
 	}
 
 	return request.SessionID + ":" + request.ToolName + ":" + string(request.Input)
+}
+
+func permissionSessionToolKey(request types.PermissionRequest) string {
+	return request.SessionID + ":" + request.ToolName
 }

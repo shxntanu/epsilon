@@ -160,13 +160,15 @@ func (m *model) resumeChat(sessionInfo events.SessionInfo) tea.Cmd {
 		if err != nil {
 			return resumeSessionMsg{sessionID: sessionID, err: err}
 		}
-		sub, err := sess.Subscribe()
+		history := sess.History()
+		sub, err := sess.SubscribeLive()
 		if err != nil {
 			return resumeSessionMsg{sessionID: sessionID, err: err}
 		}
 		return resumeSessionMsg{
 			sessionID: sessionID,
 			title:     strings.TrimSpace(sessionInfo.Title),
+			history:   history,
 			session:   sess,
 			sub:       sub,
 		}
@@ -192,9 +194,7 @@ func (m *model) applyResumeSession(msg resumeSessionMsg) tea.Cmd {
 	m.session = msg.session
 	m.subscription = msg.sub
 	m.events = msg.sub.Events()
-	m.entries = []transcriptEntry{
-		{kind: transcriptEvent, text: m.styles.muted.Render("Resumed session " + msg.session.ID())},
-	}
+	m.entries = hydrateTranscriptEntries(msg.history)
 	m.pendingUsers = nil
 	m.streaming = -1
 	m.permission = nil

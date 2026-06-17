@@ -85,6 +85,16 @@ func (s *Session) Subscribe() (*events.Subscription, error) {
 	return s.bus.Subscribe()
 }
 
+// SubscribeLive subscribes to future events without replaying session history.
+func (s *Session) SubscribeLive() (*events.Subscription, error) {
+	return s.bus.SubscribeLive()
+}
+
+// History returns the session event history known to the session bus.
+func (s *Session) History() []types.Event {
+	return s.bus.History()
+}
+
 func messagesFromEvents(history []types.Event) []types.Message {
 	messages := make([]types.Message, 0)
 	for _, event := range history {
@@ -424,6 +434,31 @@ func (s *Session) authorizeToolCall(ctx context.Context, call types.ToolCall,
 		request.Mode = types.PermissionAsk
 	}
 
+	if cachedBroker, ok := s.broker.(permissions.CachedBroker); ok {
+		if cached, ok := cachedBroker.CachedDecision(request); ok {
+			if cached.Request.ToolName == "" {
+				cached.Request = request
+			}
+			switch cached.Decision {
+			case types.PermissionDecisionAllow, types.PermissionDecisionAllowSession:
+				if _, err := s.bus.Publish(ctx, types.NewPermissionGrantedEvent(
+					time.Now().UTC(), cached)); err != nil {
+					return false, types.ToolResult{}, fmt.Errorf("publish permission granted event: %w", err)
+				}
+				return true, types.ToolResult{}, nil
+			case types.PermissionDecisionDeny:
+				if cached.Reason == "" {
+					cached.Reason = "permission denied"
+				}
+				if _, err := s.bus.Publish(ctx, types.NewPermissionDeniedEvent(
+					time.Now().UTC(), cached)); err != nil {
+					return false, types.ToolResult{}, fmt.Errorf("publish permission denied event: %w", err)
+				}
+				return false, types.ErrorToolResult(cached.Reason), nil
+			}
+		}
+	}
+
 	if _, err := s.bus.Publish(ctx, types.NewPermissionRequestedEvent(
 		time.Now().UTC(), request)); err != nil {
 		return false, types.ToolResult{}, fmt.Errorf("publish permission requested event: %w", err)
@@ -455,7 +490,7 @@ func (s *Session) authorizeToolCall(ctx context.Context, call types.ToolCall,
 	}
 
 	switch result.Decision {
-	case types.PermissionDecisionAllow:
+	case types.PermissionDecisionAllow, types.PermissionDecisionAllowSession:
 		if _, err := s.bus.Publish(ctx, types.NewPermissionGrantedEvent(
 			time.Now().UTC(), result)); err != nil {
 			return false, types.ToolResult{}, fmt.Errorf("publish permission granted event: %w", err)
