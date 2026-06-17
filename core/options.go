@@ -7,6 +7,7 @@ import (
 	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
+	"github.com/shxntanu/epsilon/core/prompts"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
@@ -82,7 +83,35 @@ func WithRuntimeSettings(settings harnessconfig.Settings) Option {
 		h.configSettings = settings
 		h.model = settings.Model
 		h.effort = settings.Effort
+		h.systemPrompt = settings.SystemPrompt
 		return nil
+	}
+}
+
+func WithSystemPrompt(prompt string) Option {
+	return func(h *Harness) error {
+		h.systemPrompt = prompt
+		h.configSettings.SystemPrompt = prompt
+		return nil
+	}
+}
+
+func WithPromptCatalog(catalog *prompts.Catalog) Option {
+	return func(h *Harness) error {
+		if catalog == nil {
+			return fmt.Errorf("prompt catalog is nil")
+		}
+		h.promptCatalog = catalog
+		return nil
+	}
+}
+
+func WithPromptDefinition(definition prompts.Definition) Option {
+	return func(h *Harness) error {
+		if h.promptCatalog == nil {
+			h.promptCatalog = prompts.DefaultCatalog()
+		}
+		return h.promptCatalog.Register(definition)
 	}
 }
 

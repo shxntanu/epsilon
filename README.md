@@ -81,6 +81,7 @@ epsilon reads harness configuration at boot from:
 ```
 
 Session defaults are updated as you change settings during a session, so model and effort changes can carry into following sessions. API keys are intentionally left out of persisted config; provide them through environment variables or flags.
+epsilon has a prompt framework in `core/prompts` with named prompt definitions for the main agent, summary agents, and title agents. Default prompt text lives in embedded `.txt` files under `core/prompts/defaults`. The main agent prompt is injected by default. Additional system-prompt text can be supplied inline, from a file, through environment variables, or as persisted config; that text is appended to the default agent prompt without being duplicated into saved session history.
 
 Useful flags:
 
@@ -93,6 +94,8 @@ Useful flags:
 -litellm-api-key <key>
 -model <model>
 -effort <effort>
+-system-prompt "follow these harness instructions"
+-system-prompt-file ./SYSTEM_PROMPT.md
 ```
 
 ## TUI slash commands

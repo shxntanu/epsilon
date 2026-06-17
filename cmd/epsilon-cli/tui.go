@@ -24,9 +24,15 @@ func tuiCommand(ctx context.Context, args []string) error {
 	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
 	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
 	effort := fs.String("effort", envOrDefault("EPSILON_MODEL_EFFORT", defaults.Effort), "model reasoning effort")
+	systemPrompt := fs.String("system-prompt", envOrDefault("EPSILON_SYSTEM_PROMPT", defaults.SystemPrompt), "additional system prompt text")
+	systemPromptFile := fs.String("system-prompt-file", envOrDefault("EPSILON_SYSTEM_PROMPT_FILE", ""), "path to an additional system prompt file")
 	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
 	litellmAPIKey := fs.String("litellm-api-key", envOrDefault("LITELLM_API_KEY", ""), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedSystemPrompt, err := resolveSystemPrompt(*systemPrompt, *systemPromptFile)
+	if err != nil {
 		return err
 	}
 
@@ -41,6 +47,7 @@ func tuiCommand(ctx context.Context, args []string) error {
 		provider:        *provider,
 		model:           *model,
 		effort:          *effort,
+		systemPrompt:    resolvedSystemPrompt,
 		litellmBaseURL:  *litellmBaseURL,
 		litellmAPIKey:   *litellmAPIKey,
 		eventBufferSize: defaults.EventBufferSize,

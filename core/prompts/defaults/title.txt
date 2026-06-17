@@ -1,0 +1,3 @@
+Generate a short, specific title for the session based on the user's goal and the work performed.
+
+Use plain title case. Avoid punctuation unless it is part of a file, command, package, or product name.

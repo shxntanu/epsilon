@@ -30,6 +30,7 @@ type Settings struct {
 	Provider        string `json:"provider,omitempty"`
 	Model           string `json:"model,omitempty"`
 	Effort          string `json:"effort,omitempty"`
+	SystemPrompt    string `json:"system_prompt,omitempty"`
 	LiteLLMBaseURL  string `json:"litellm_base_url,omitempty"`
 	EventBufferSize int    `json:"event_buffer_size,omitempty"`
 }
@@ -89,6 +90,9 @@ func overlaySettings(base Settings, override Settings) Settings {
 	}
 	if strings.TrimSpace(override.Effort) != "" {
 		base.Effort = override.Effort
+	}
+	if strings.TrimSpace(override.SystemPrompt) != "" {
+		base.SystemPrompt = override.SystemPrompt
 	}
 	if strings.TrimSpace(override.LiteLLMBaseURL) != "" {
 		base.LiteLLMBaseURL = override.LiteLLMBaseURL
@@ -226,6 +230,7 @@ func sanitizeSettings(settings Settings) Settings {
 	settings.Provider = strings.TrimSpace(settings.Provider)
 	settings.Model = strings.TrimSpace(settings.Model)
 	settings.Effort = strings.TrimSpace(settings.Effort)
+	settings.SystemPrompt = strings.TrimSpace(settings.SystemPrompt)
 	settings.LiteLLMBaseURL = strings.TrimRight(strings.TrimSpace(settings.LiteLLMBaseURL), "/")
 	if settings.EventBufferSize < 0 {
 		settings.EventBufferSize = 0

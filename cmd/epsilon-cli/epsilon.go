@@ -26,6 +26,7 @@ type harnessConfig struct {
 	provider        string
 	model           string
 	effort          string
+	systemPrompt    string
 	litellmBaseURL  string
 	litellmAPIKey   string
 	eventBufferSize int
@@ -80,9 +81,15 @@ func runCommand(ctx context.Context, args []string) error {
 	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
 	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
 	effort := fs.String("effort", envOrDefault("EPSILON_MODEL_EFFORT", defaults.Effort), "model reasoning effort")
+	systemPrompt := fs.String("system-prompt", envOrDefault("EPSILON_SYSTEM_PROMPT", defaults.SystemPrompt), "additional system prompt text")
+	systemPromptFile := fs.String("system-prompt-file", envOrDefault("EPSILON_SYSTEM_PROMPT_FILE", ""), "path to an additional system prompt file")
 	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
 	litellmAPIKey := fs.String("litellm-api-key", os.Getenv("LITELLM_API_KEY"), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedSystemPrompt, err := resolveSystemPrompt(*systemPrompt, *systemPromptFile)
+	if err != nil {
 		return err
 	}
 
@@ -97,6 +104,7 @@ func runCommand(ctx context.Context, args []string) error {
 		provider:        *provider,
 		model:           *model,
 		effort:          *effort,
+		systemPrompt:    resolvedSystemPrompt,
 		litellmBaseURL:  *litellmBaseURL,
 		litellmAPIKey:   *litellmAPIKey,
 		eventBufferSize: defaults.EventBufferSize,
@@ -145,9 +153,15 @@ func resumeCommand(ctx context.Context, args []string) error {
 	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
 	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
 	effort := fs.String("effort", envOrDefault("EPSILON_MODEL_EFFORT", defaults.Effort), "model reasoning effort")
+	systemPrompt := fs.String("system-prompt", envOrDefault("EPSILON_SYSTEM_PROMPT", defaults.SystemPrompt), "additional system prompt text")
+	systemPromptFile := fs.String("system-prompt-file", envOrDefault("EPSILON_SYSTEM_PROMPT_FILE", ""), "path to an additional system prompt file")
 	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
 	litellmAPIKey := fs.String("litellm-api-key", os.Getenv("LITELLM_API_KEY"), "LiteLLM proxy API key")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedSystemPrompt, err := resolveSystemPrompt(*systemPrompt, *systemPromptFile)
+	if err != nil {
 		return err
 	}
 
@@ -163,6 +177,7 @@ func resumeCommand(ctx context.Context, args []string) error {
 		provider:        *provider,
 		model:           *model,
 		effort:          *effort,
+		systemPrompt:    resolvedSystemPrompt,
 		litellmBaseURL:  *litellmBaseURL,
 		litellmAPIKey:   *litellmAPIKey,
 		eventBufferSize: defaults.EventBufferSize,
@@ -257,6 +272,7 @@ func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error
 			Provider:        config.provider,
 			Model:           config.model,
 			Effort:          config.effort,
+			SystemPrompt:    config.systemPrompt,
 			LiteLLMBaseURL:  config.litellmBaseURL,
 			EventBufferSize: config.eventBufferSize,
 		}),
@@ -283,6 +299,7 @@ func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error
 			Provider:        config.provider,
 			Model:           config.model,
 			Effort:          config.effort,
+			SystemPrompt:    config.systemPrompt,
 			LiteLLMBaseURL:  config.litellmBaseURL,
 			EventBufferSize: config.eventBufferSize,
 		}); err != nil {
@@ -378,6 +395,19 @@ func messageFromArgs(args []string) (string, error) {
 	}
 
 	return message, nil
+}
+
+func resolveSystemPrompt(prompt string, promptFile string) (string, error) {
+	promptFile = strings.TrimSpace(promptFile)
+	if promptFile == "" {
+		return strings.TrimSpace(prompt), nil
+	}
+
+	data, err := os.ReadFile(promptFile)
+	if err != nil {
+		return "", fmt.Errorf("read system prompt file: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func drainEvents(w io.Writer, ch <-chan types.Event) {
@@ -478,6 +508,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  -litellm-api-key <key>")
 	fmt.Fprintln(w, "  -model <model>")
 	fmt.Fprintln(w, "  -effort <effort>")
+	fmt.Fprintln(w, "  -system-prompt <text>        append instructions to the default system prompt")
+	fmt.Fprintln(w, "  -system-prompt-file <path>   append instructions from a file")
 	fmt.Fprintln(w, "  -config .epsilon/config.json")
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
+	"github.com/shxntanu/epsilon/core/prompts"
 	"github.com/shxntanu/epsilon/core/session"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/tools"
@@ -32,6 +33,8 @@ type Harness struct {
 	selectedModel    *types.ModelInfo
 	model            string
 	effort           string
+	promptCatalog    *prompts.Catalog
+	systemPrompt     string
 	permissionBroker permissions.Broker
 	eventStore       events.Store
 	configStore      *harnessconfig.Store
@@ -52,6 +55,7 @@ func New(opts ...Option) (*Harness, error) {
 		toolRegistry:    tools.NewRegistry(),
 		slashRegistry:   slash.NewDefaultRegistry(),
 		contextTracker:  contextwindow.DefaultTracker(),
+		promptCatalog:   prompts.DefaultCatalog(),
 	}
 
 	for _, opt := range opts {
@@ -232,6 +236,12 @@ func (h *Harness) CurrentEffort() string {
 	return h.effort
 }
 
+func (h *Harness) CurrentSystemPrompt() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.renderPromptLocked(prompts.Agent, h.systemPrompt)
+}
+
 func (h *Harness) SetModel(ctx context.Context, model string) error {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -262,13 +272,46 @@ func (h *Harness) SetEffort(effort string) error {
 	return h.saveSessionDefaults()
 }
 
+func (h *Harness) SetSystemPrompt(prompt string) error {
+	prompt = strings.TrimSpace(prompt)
+
+	h.mu.Lock()
+	h.systemPrompt = prompt
+	h.configSettings.SystemPrompt = prompt
+	h.mu.Unlock()
+
+	return h.saveSessionDefaults()
+}
+
 func (h *Harness) modelRequestSettings() types.ModelRequestSettings {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return types.ModelRequestSettings{
-		Model:  h.model,
-		Effort: h.effort,
+		Model:        h.model,
+		Effort:       h.effort,
+		SystemPrompt: h.renderPromptLocked(prompts.Agent, h.systemPrompt),
 	}
+}
+
+func (h *Harness) RenderPrompt(id prompts.ID, extensions ...string) (string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.promptCatalog == nil {
+		return "", false
+	}
+	return h.promptCatalog.Render(id, extensions...)
+}
+
+func (h *Harness) renderPromptLocked(id prompts.ID, extensions ...string) string {
+	if h.promptCatalog == nil {
+		h.promptCatalog = prompts.DefaultCatalog()
+	}
+	prompt, ok := h.promptCatalog.Render(id, extensions...)
+	if !ok {
+		return strings.TrimSpace(strings.Join(extensions, "\n\n"))
+	}
+	return prompt
 }
 
 func (h *Harness) refreshSelectedModel(ctx context.Context) {

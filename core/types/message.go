@@ -120,8 +120,9 @@ type ModelRequest struct {
 
 // ModelRequestSettings are runtime model options applied to each request.
 type ModelRequestSettings struct {
-	Model  string `json:"model,omitempty"`
-	Effort string `json:"effort,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Effort       string `json:"effort,omitempty"`
+	SystemPrompt string `json:"system_prompt,omitempty"`
 }
 
 // ModelResponse is the provider-neutral output returned by an LLM provider.

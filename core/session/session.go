@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -201,6 +202,7 @@ func (s *Session) Step(ctx context.Context) error {
 		}
 
 		requestSettings := s.currentRequestSettings()
+		messages = messagesWithSystemPrompt(requestSettings.SystemPrompt, messages)
 		resp, err := s.respond(ctx, provider, types.ModelRequest{
 			Model:    requestSettings.Model,
 			Effort:   requestSettings.Effort,
@@ -264,6 +266,18 @@ func (s *Session) modelRequestState() ([]types.Message, types.Provider, *tools.R
 	copy(messages, s.messages)
 
 	return messages, s.provider, s.tools, nil
+}
+
+func messagesWithSystemPrompt(prompt string, messages []types.Message) []types.Message {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return messages
+	}
+
+	withPrompt := make([]types.Message, 0, len(messages)+1)
+	withPrompt = append(withPrompt, types.SystemMessage(prompt))
+	withPrompt = append(withPrompt, messages...)
+	return withPrompt
 }
 
 func (s *Session) respond(ctx context.Context, provider types.Provider,

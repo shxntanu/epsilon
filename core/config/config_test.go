@@ -20,6 +20,7 @@ func TestStorePersistsSessionDefaults(t *testing.T) {
 		Workspace:      "/tmp/work",
 		Provider:       "litellm",
 		Model:          "openai/gpt-4o",
+		SystemPrompt:   "use lazy repo inspection",
 		LiteLLMBaseURL: "http://litellm.test/",
 	}); err != nil {
 		t.Fatalf("save session defaults: %v", err)
@@ -35,6 +36,9 @@ func TestStorePersistsSessionDefaults(t *testing.T) {
 	}
 	if settings.Model != "openai/gpt-4o" {
 		t.Fatalf("model = %q, want openai/gpt-4o", settings.Model)
+	}
+	if settings.SystemPrompt != "use lazy repo inspection" {
+		t.Fatalf("system prompt = %q, want persisted prompt", settings.SystemPrompt)
 	}
 	if settings.LiteLLMBaseURL != "http://litellm.test" {
 		t.Fatalf("base url = %q, want trimmed url", settings.LiteLLMBaseURL)
