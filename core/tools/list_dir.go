@@ -12,7 +12,7 @@ import (
 	"github.com/shxntanu/epsilon/core/types"
 )
 
-const defaultListDirMaxEntries = 200
+const defaultListDirMaxEntries = 100
 
 type listDirInput struct {
 	Path       string `json:"path,omitempty"`
@@ -36,15 +36,14 @@ func (t *ListDirTool) Name() string {
 }
 
 func (t *ListDirTool) Description() string {
-	return "List the immediate children of a workspace directory, like ls. Use this before " +
-		"reading files when gradually exploring an unfamiliar repository."
+	return "List immediate children of a workspace directory."
 }
 
 func (t *ListDirTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string",` +
-		`"description":"Workspace-relative directory path to list. Defaults to '.'."},` +
+		`"description":"Workspace-relative directory. Defaults to '.'."},` +
 		`"max_entries":{"type":"integer","minimum":1,"maximum":1000,"description":` +
-		`"Maximum entries to return. Defaults to 200."}},"additionalProperties":false}`)
+		`"Maximum entries. Defaults to 100."}},"additionalProperties":false}`)
 }
 
 func (t *ListDirTool) Permission() types.PermissionMode {

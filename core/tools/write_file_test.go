@@ -41,3 +41,37 @@ func TestWriteFileToolIncludesDiffMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteFileToolBoundsLargeDiffMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "large.txt")
+	if err := os.WriteFile(path, []byte(strings.Repeat("old\n", 6000)), 0o644); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+
+	tool, err := NewWriteFileTool(dir)
+	if err != nil {
+		t.Fatalf("new write file: %v", err)
+	}
+
+	input, err := json.Marshal(map[string]any{
+		"path":      "large.txt",
+		"content":   strings.Repeat("new\n", 6000),
+		"overwrite": true,
+	})
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	result, err := tool.Run(context.Background(), input)
+	if err != nil {
+		t.Fatalf("run write file: %v", err)
+	}
+	diff := result.Metadata["diff"]
+	if len(diff) > defaultWriteFileDiffMaxBytes {
+		t.Fatalf("diff metadata too large: %d", len(diff))
+	}
+	if !strings.Contains(diff, "diff omitted") {
+		t.Fatalf("expected omitted diff marker, got:\n%s", diff)
+	}
+}

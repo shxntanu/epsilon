@@ -245,6 +245,7 @@ func (s *Session) Step(ctx context.Context) error {
 			Kind:      types.EventModelMessageCompleted,
 			CreatedAt: time.Now().UTC(),
 			Message:   &resp.Message,
+			Usage:     usagePointer(resp.Usage),
 		}); err != nil {
 			return fmt.Errorf("publish model completed event: %w", err)
 		}
@@ -297,6 +298,13 @@ func messagesWithSystemPrompt(prompt string, messages []types.Message) []types.M
 	withPrompt = append(withPrompt, types.SystemMessage(prompt))
 	withPrompt = append(withPrompt, messages...)
 	return withPrompt
+}
+
+func usagePointer(usage types.Usage) *types.Usage {
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.TotalTokens == 0 {
+		return nil
+	}
+	return &usage
 }
 
 func (s *Session) respond(ctx context.Context, provider types.Provider,

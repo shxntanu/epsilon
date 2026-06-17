@@ -133,11 +133,16 @@ func (p *Provider) Respond(ctx context.Context,
 }
 
 type chatCompletionRequest struct {
-	Model           string        `json:"model"`
-	Messages        []chatMessage `json:"messages"`
-	Tools           []chatTool    `json:"tools,omitempty"`
-	Stream          bool          `json:"stream,omitempty"`
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	Model           string             `json:"model"`
+	Messages        []chatMessage      `json:"messages"`
+	Tools           []chatTool         `json:"tools,omitempty"`
+	Stream          bool               `json:"stream,omitempty"`
+	StreamOptions   *chatStreamOptions `json:"stream_options,omitempty"`
+	ReasoningEffort string             `json:"reasoning_effort,omitempty"`
+}
+
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type chatMessage struct {
@@ -185,12 +190,19 @@ type chatCompletionStreamResponse struct {
 	Choices []struct {
 		Delta chatStreamDelta `json:"delta"`
 	} `json:"choices"`
+	Usage chatUsage `json:"usage,omitempty"`
 }
 
 type chatStreamDelta struct {
 	Role      string         `json:"role,omitempty"`
 	Content   string         `json:"content,omitempty"`
 	ToolCalls []chatToolCall `json:"tool_calls,omitempty"`
+}
+
+type chatUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // StreamRespond sends a streaming chat completion request to the LiteLLM proxy.
@@ -205,6 +217,7 @@ func (p *Provider) StreamRespond(ctx context.Context, req types.ModelRequest,
 		Messages:        convertMessages(req.Messages),
 		Tools:           convertTools(req.Tools),
 		Stream:          true,
+		StreamOptions:   &chatStreamOptions{IncludeUsage: true},
 		ReasoningEffort: strings.TrimSpace(req.Effort),
 	}
 
@@ -238,27 +251,29 @@ func (p *Provider) StreamRespond(ctx context.Context, req types.ModelRequest,
 			httpResp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
-	message, err := readStreamResponse(ctx, httpResp.Body, emit)
+	message, usage, err := readStreamResponse(ctx, httpResp.Body, emit)
 	if err != nil {
 		return nil, err
 	}
 
 	return &types.ModelResponse{
 		Message: message,
+		Usage:   usage,
 	}, nil
 }
 
 func readStreamResponse(ctx context.Context, body io.Reader,
-	emit func(types.ModelDelta) error) (types.Message, error) {
+	emit func(types.ModelDelta) error) (types.Message, types.Usage, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var content strings.Builder
 	var toolCalls []chatToolCall
+	var usage types.Usage
 
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			return types.Message{}, fmt.Errorf("litellm stream cancelled: %w", err)
+			return types.Message{}, types.Usage{}, fmt.Errorf("litellm stream cancelled: %w", err)
 		}
 
 		line := strings.TrimSpace(scanner.Text())
@@ -276,7 +291,15 @@ func readStreamResponse(ctx context.Context, body io.Reader,
 
 		var chunk chatCompletionStreamResponse
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return types.Message{}, fmt.Errorf("decode litellm stream chunk: %w", err)
+			return types.Message{}, types.Usage{}, fmt.Errorf("decode litellm stream chunk: %w", err)
+		}
+		if chunk.Usage.PromptTokens != 0 || chunk.Usage.CompletionTokens != 0 ||
+			chunk.Usage.TotalTokens != 0 {
+			usage = types.Usage{
+				InputTokens:  chunk.Usage.PromptTokens,
+				OutputTokens: chunk.Usage.CompletionTokens,
+				TotalTokens:  chunk.Usage.TotalTokens,
+			}
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -287,21 +310,21 @@ func readStreamResponse(ctx context.Context, body io.Reader,
 			content.WriteString(delta.Content)
 			if emit != nil {
 				if err := emit(types.ModelDelta{Text: delta.Content}); err != nil {
-					return types.Message{}, err
+					return types.Message{}, types.Usage{}, err
 				}
 			}
 		}
 		toolCalls = mergeStreamToolCalls(toolCalls, delta.ToolCalls)
 	}
 	if err := scanner.Err(); err != nil {
-		return types.Message{}, fmt.Errorf("read litellm stream: %w", err)
+		return types.Message{}, types.Usage{}, fmt.Errorf("read litellm stream: %w", err)
 	}
 
 	return types.Message{
 		Role:      types.RoleAssistant,
 		Content:   []types.ContentPart{types.TextPart(content.String())},
 		ToolCalls: convertResponseToolCalls(toolCalls),
-	}, nil
+	}, usage, nil
 }
 
 func mergeStreamToolCalls(existing []chatToolCall, deltas []chatToolCall) []chatToolCall {

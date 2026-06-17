@@ -87,6 +87,48 @@ func TestSystemPromptIsInjectedIntoModelRequest(t *testing.T) {
 	}
 }
 
+func TestModelUsageIsPersistedOnCompletedEvent(t *testing.T) {
+	provider := &recordingProvider{
+		usage: types.Usage{
+			InputTokens:  11,
+			OutputTokens: 7,
+			TotalTokens:  18,
+		},
+	}
+	harness, err := New(
+		WithProvider(provider),
+		WithSessionIDGenerator(func() (string, error) { return "session_usage", nil }),
+	)
+	if err != nil {
+		t.Fatalf("new harness: %v", err)
+	}
+
+	sess, err := harness.StartSession(context.Background())
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	if err := sess.Send(context.Background(), types.UserMessage("hello")); err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+	if err := sess.Step(context.Background()); err != nil {
+		t.Fatalf("step: %v", err)
+	}
+
+	for _, event := range sess.History() {
+		if event.Kind != types.EventModelMessageCompleted {
+			continue
+		}
+		if event.Usage == nil {
+			t.Fatalf("completed event missing usage")
+		}
+		if *event.Usage != provider.usage {
+			t.Fatalf("usage = %#v, want %#v", *event.Usage, provider.usage)
+		}
+		return
+	}
+	t.Fatalf("model completed event not found")
+}
+
 func TestHarnessCanRenderOtherPromptKinds(t *testing.T) {
 	harness, err := New()
 	if err != nil {
@@ -107,6 +149,7 @@ func TestHarnessCanRenderOtherPromptKinds(t *testing.T) {
 
 type recordingProvider struct {
 	request types.ModelRequest
+	usage   types.Usage
 }
 
 func (p *recordingProvider) Respond(_ context.Context,
@@ -114,6 +157,7 @@ func (p *recordingProvider) Respond(_ context.Context,
 	p.request = cloneModelRequest(req)
 	return &types.ModelResponse{
 		Message: types.AssistantMessage("ok"),
+		Usage:   p.usage,
 	}, nil
 }
 

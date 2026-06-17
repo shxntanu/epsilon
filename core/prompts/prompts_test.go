@@ -32,6 +32,25 @@ func TestDefaultAgentPromptComesFromEmbeddedTextFile(t *testing.T) {
 	}
 }
 
+func TestDefaultAgentPromptIsCompactAndGuidesToolUse(t *testing.T) {
+	prompt := DefaultAgent().Render()
+	if len(prompt) > 3500 {
+		t.Fatalf("default agent prompt is too large: %d bytes", len(prompt))
+	}
+	for _, want := range []string{
+		"Inspect the repo before editing",
+		"start_line",
+		"end_line",
+		"Avoid full-file reads",
+		"Prefer `apply_patch`",
+		"Avoid repeated searches",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("default agent prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestCatalogIDsAreSorted(t *testing.T) {
 	catalog := DefaultCatalog()
 	got := catalog.IDs()

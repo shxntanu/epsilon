@@ -13,7 +13,7 @@ import (
 )
 
 const defaultWriteFileMaxBytes = 512 * 1024
-const defaultWriteFileDiffMaxBytes = 64 * 1024
+const defaultWriteFileDiffMaxBytes = 16 * 1024
 
 // WriteFileTool writes UTF-8 text to files inside a workspace.
 type WriteFileTool struct {
@@ -41,16 +41,15 @@ func (t *WriteFileTool) Name() string {
 
 // Description returns the tool description exposed to the model.
 func (t *WriteFileTool) Description() string {
-	return "Write UTF-8 text to a workspace-relative file. Creates parent directories and " +
-		"requires overwrite=true for existing files."
+	return "Write UTF-8 text to a workspace file. Existing files require overwrite=true."
 }
 
 // InputSchema returns the tool input schema.
 func (t *WriteFileTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description"` +
-		`:"Workspace-relative path to write."},"content":{"type":"string","description":"Complete` +
-		` file contents to write."},"overwrite":{"type":"boolean","description":"Set true to ` +
-		`replace an existing file."}},"required":["path","content"],"additionalProperties":false}`)
+		`:"Workspace-relative file path."},"content":{"type":"string","description":"Complete` +
+		` file contents."},"overwrite":{"type":"boolean","description":"Replace existing file."}},` +
+		`"required":["path","content"],"additionalProperties":false}`)
 }
 
 // Permission returns the default permission mode for this tool.
@@ -172,7 +171,7 @@ func writeFileDiff(path string, before []byte, after []byte, existed bool) strin
 	}
 
 	return fmt.Sprintf("--- a/%s\n+++ b/%s\n@@\n%s\n", path, path,
-		"[diff omitted: write_file change is too large to render inline]")
+		"[diff omitted: write_file change exceeds 16384 bytes]")
 }
 
 func writeFullFileDiffLines(b *strings.Builder, prefix byte, text string) {

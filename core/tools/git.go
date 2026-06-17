@@ -12,7 +12,7 @@ import (
 	"github.com/shxntanu/epsilon/core/types"
 )
 
-const defaultGitOutputMaxBytes = 128 * 1024
+const defaultGitOutputMaxBytes = 32 * 1024
 
 type gitStatusInput struct {
 	Short bool `json:"short,omitempty"`
@@ -42,13 +42,12 @@ func (t *GitStatusTool) Name() string {
 }
 
 func (t *GitStatusTool) Description() string {
-	return "Show read-only git working tree status for the workspace. Use this before edits " +
-		"to understand existing user changes."
+	return "Show read-only git working tree status."
 }
 
 func (t *GitStatusTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"short":{"type":"boolean",` +
-		`"description":"Use short porcelain status. Defaults to true."}},` +
+		`"description":"Use short status. Defaults to true."}},` +
 		`"additionalProperties":false}`)
 }
 
@@ -86,16 +85,15 @@ func (t *GitDiffTool) Name() string {
 }
 
 func (t *GitDiffTool) Description() string {
-	return "Show read-only git diff output for unstaged or staged workspace changes. " +
-		"Optionally scope to a workspace-relative path."
+	return "Show read-only git diff output, optionally scoped to a path."
 }
 
 func (t *GitDiffTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string",` +
-		`"description":"Optional workspace-relative file or directory path to diff."},` +
-		`"staged":{"type":"boolean","description":"Show staged changes with --cached."},` +
+		`"description":"Workspace-relative file or directory."},` +
+		`"staged":{"type":"boolean","description":"Show staged changes."},` +
 		`"context":{"type":"integer","minimum":0,"maximum":100,"description":"Unified ` +
-		`diff context lines. Defaults to git's default."}},"additionalProperties":false}`)
+		`diff context lines."}},"additionalProperties":false}`)
 }
 
 func (t *GitDiffTool) Permission() types.PermissionMode {

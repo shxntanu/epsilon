@@ -34,6 +34,7 @@ type Event struct {
 	ToolCall   *ToolCall         `json:"tool_call,omitempty"`
 	ToolResult *ToolResult       `json:"tool_result,omitempty"`
 	Permission *PermissionResult `json:"permission,omitempty"`
+	Usage      *Usage            `json:"usage,omitempty"`
 	Error      string            `json:"error,omitempty"`
 }
 

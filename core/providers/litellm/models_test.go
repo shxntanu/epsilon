@@ -150,6 +150,69 @@ func TestRespondUsesRequestModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestStreamRespondRequestsAndParsesUsage(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %s, want /chat/completions", r.URL.Path)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if payload["stream"] != true {
+			t.Fatalf("stream = %v, want true", payload["stream"])
+		}
+		options, ok := payload["stream_options"].(map[string]any)
+		if !ok {
+			t.Fatalf("stream_options missing or wrong type: %#v", payload["stream_options"])
+		}
+		if options["include_usage"] != true {
+			t.Fatalf("include_usage = %v, want true", options["include_usage"])
+		}
+
+		body := "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"hel\"}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{\"content\":\"lo\"}}]}\n\n" +
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":5,\"total_tokens\":17}}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewBufferString(body)),
+		}, nil
+	})}
+
+	provider, err := New(Config{
+		BaseURL:    "http://litellm.test",
+		Model:      "default-model",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	var streamed string
+	resp, err := provider.StreamRespond(context.Background(), types.ModelRequest{
+		Messages: []types.Message{types.UserMessage("hello")},
+	}, func(delta types.ModelDelta) error {
+		streamed += delta.Text
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream respond: %v", err)
+	}
+	if streamed != "hello" {
+		t.Fatalf("streamed = %q, want hello", streamed)
+	}
+	if resp.Message.Content[0].Text != "hello" {
+		t.Fatalf("message = %q, want hello", resp.Message.Content[0].Text)
+	}
+	want := types.Usage{InputTokens: 12, OutputTokens: 5, TotalTokens: 17}
+	if resp.Usage != want {
+		t.Fatalf("usage = %#v, want %#v", resp.Usage, want)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

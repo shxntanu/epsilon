@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	maxGrepLineBytes   = 1024 * 1024
-	maxGrepDisplayCols = 1200
+	maxGrepLineBytes      = 1024 * 1024
+	maxGrepDisplayCols    = 200
+	maxGrepWrittenBytes   = 32 * 1024
+	maxGrepWrittenMatches = 50
 )
 
 // GrepTool searches files inside a workspace.
@@ -49,9 +51,7 @@ func (t *GrepTool) Name() string {
 }
 
 func (t *GrepTool) Description() string {
-	return "Recursively searches for regular expression patterns within files at a specified" +
-		" path. Returns matching lines along with structural context lines above and below" +
-		" to help map out code environments."
+	return "Search workspace files with a regular expression and small line context."
 }
 
 func (t *GrepTool) InputSchema() json.RawMessage {
@@ -60,15 +60,15 @@ func (t *GrepTool) InputSchema() json.RawMessage {
 		"properties": {
 			"pattern": {
 				"type": "string",
-				"description": "The regular expression pattern to match (e.g., 'func .* struct')"
+				"description": "Regular expression to match."
 			},
 			"path": {
 				"type": "string",
-				"description": "Workspace-relative directory or file path to search. Defaults to '.'."
+				"description": "Workspace-relative file or directory. Defaults to '.'."
 			},
 			"include_extend": {
 				"type": "integer",
-				"description": "Number of lines of context to include before and after the match. Defaults to 2."
+				"description": "Context lines before and after each match. Defaults to 2."
 			}
 		},
 		"required": ["pattern"],
@@ -189,7 +189,8 @@ func (t *GrepTool) Run(ctx context.Context, input json.RawMessage) (*types.ToolR
 				continue
 			}
 			totalMatches++
-			if totalWritten >= 150 {
+			if totalWritten >= maxGrepWrittenMatches ||
+				sb.Len()+len(match.Output) > maxGrepWrittenBytes {
 				truncated = true
 				continue
 			}

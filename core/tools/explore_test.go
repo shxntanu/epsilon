@@ -94,6 +94,81 @@ func TestGitToolsReportStatusAndDiff(t *testing.T) {
 	}
 }
 
+func TestToolDefinitionsHaveValidCompactSchemas(t *testing.T) {
+	dir := t.TempDir()
+	factories := []func(string) (Tool, error){
+		func(root string) (Tool, error) { return NewReadFileTool(root) },
+		func(root string) (Tool, error) { return NewWriteFileTool(root) },
+		func(root string) (Tool, error) { return NewGrepTool(root) },
+		func(root string) (Tool, error) { return NewListDirTool(root) },
+		func(root string) (Tool, error) { return NewFileTreeTool(root) },
+		func(root string) (Tool, error) { return NewGitStatusTool(root) },
+		func(root string) (Tool, error) { return NewGitDiffTool(root) },
+		func(root string) (Tool, error) { return NewPatchTool(root) },
+	}
+
+	for _, factory := range factories {
+		tool, err := factory(dir)
+		if err != nil {
+			t.Fatalf("create tool: %v", err)
+		}
+		if !json.Valid(tool.InputSchema()) {
+			t.Fatalf("%s schema is invalid JSON: %s", tool.Name(), tool.InputSchema())
+		}
+		if len(tool.Description()) > 100 {
+			t.Fatalf("%s description too long: %q", tool.Name(), tool.Description())
+		}
+	}
+}
+
+func TestGrepToolCapsMatchesAndOutput(t *testing.T) {
+	dir := t.TempDir()
+	var content strings.Builder
+	for i := 0; i < 80; i++ {
+		content.WriteString("needle line\n")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "many.txt"), []byte(content.String()), 0o644); err != nil {
+		t.Fatalf("write many: %v", err)
+	}
+
+	tool, err := NewGrepTool(dir)
+	if err != nil {
+		t.Fatalf("new grep tool: %v", err)
+	}
+	result := runTool(t, tool, map[string]any{"pattern": "needle", "path": "many.txt"})
+
+	if result.Metadata["written_matches"] != "50" {
+		t.Fatalf("written_matches = %s, want 50", result.Metadata["written_matches"])
+	}
+	if result.Metadata["truncated"] != "true" {
+		t.Fatalf("truncated = %s, want true", result.Metadata["truncated"])
+	}
+	if len(result.Content[0].Text) > maxGrepWrittenBytes+200 {
+		t.Fatalf("grep output too large: %d bytes", len(result.Content[0].Text))
+	}
+}
+
+func TestGrepToolTruncatesLongLines(t *testing.T) {
+	dir := t.TempDir()
+	longLine := "needle " + strings.Repeat("x", 400)
+	if err := os.WriteFile(filepath.Join(dir, "long.txt"), []byte(longLine+"\n"), 0o644); err != nil {
+		t.Fatalf("write long: %v", err)
+	}
+
+	tool, err := NewGrepTool(dir)
+	if err != nil {
+		t.Fatalf("new grep tool: %v", err)
+	}
+	result := runTool(t, tool, map[string]any{"pattern": "needle", "path": "long.txt"})
+
+	if !strings.Contains(result.Content[0].Text, "[line truncated]") {
+		t.Fatalf("expected truncated line marker:\n%s", result.Content[0].Text)
+	}
+	if strings.Contains(result.Content[0].Text, strings.Repeat("x", 300)) {
+		t.Fatalf("grep output included too much of the long line:\n%s", result.Content[0].Text)
+	}
+}
+
 func runTool(t *testing.T, tool Tool, input map[string]any) *types.ToolResult {
 	t.Helper()
 	data, err := json.Marshal(input)

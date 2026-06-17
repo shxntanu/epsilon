@@ -38,7 +38,7 @@ The project is still experimental, but the shape is intentionally practical: boo
 - In-TUI model picker backed by provider model metadata.
 - Config defaults and session defaults stored in `.epsilon/config.json`.
 - Cached provider model metadata to avoid repeated expensive discovery calls.
-- Local workspace tools for reading, writing, grepping, patching, and echoing.
+- Local workspace tools for reading, writing, grepping, patching, listing, and git inspection.
 - Permission broker support for tool execution.
 - Context window summary and model metadata display.
 - Markdown rendering for assistant responses.

@@ -13,6 +13,8 @@ import (
 	"github.com/sourcegraph/go-diff/diff"
 )
 
+const defaultPatchDiffMaxBytes = 16 * 1024
+
 type patchAction int
 
 const (
@@ -66,10 +68,7 @@ func (t *PatchTool) Name() string {
 }
 
 func (t *PatchTool) Description() string {
-	return "Applies a patch string to modify files in the workspace. Supports standard " +
-		"unified diffs and agent-style patches using *** Begin Patch with Add File, " +
-		"Update File, and Delete File sections. Use this for precise edits, additions, " +
-		"or deletions across one or multiple files."
+	return "Apply a unified diff or *** Begin Patch block inside the workspace."
 }
 
 func (t *PatchTool) InputSchema() json.RawMessage {
@@ -78,7 +77,7 @@ func (t *PatchTool) InputSchema() json.RawMessage {
 		"properties": {
 			"patch": {
 				"type": "string",
-				"description": "Patch text as a unified diff or an agent-style *** Begin Patch block."
+				"description": "Unified diff or *** Begin Patch text."
 			}
 		},
 		"required": ["patch"],
@@ -141,10 +140,18 @@ func (t *PatchTool) Run(ctx context.Context, input json.RawMessage) (*types.Tool
 	result.Metadata = map[string]string{
 		"status":         "patched",
 		"modified_files": strings.Join(appliedFiles, ","),
-		"diff":           strings.TrimSpace(args.Patch),
+		"diff":           boundedPatchDiff(args.Patch),
 	}
 
 	return &result, nil
+}
+
+func boundedPatchDiff(raw string) string {
+	patch := strings.TrimSpace(raw)
+	if len(patch) <= defaultPatchDiffMaxBytes {
+		return patch
+	}
+	return "[diff omitted: apply_patch change exceeds 16384 bytes]"
 }
 
 func parsePatch(rawPatch string) ([]filePatch, error) {

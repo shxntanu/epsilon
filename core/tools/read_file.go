@@ -11,7 +11,7 @@ import (
 	"github.com/shxntanu/epsilon/core/types"
 )
 
-const defaultReadFileMaxBytes = 128 * 1024
+const defaultReadFileMaxBytes = 32 * 1024
 
 type readFileInput struct {
 	Path      string `json:"path"`
@@ -61,18 +61,16 @@ func (t *ReadFileTool) Name() string {
 
 // Description returns the tool description exposed to the model.
 func (t *ReadFileTool) Description() string {
-	return "Read a text file from the workspace using a relative path. Optionally read an " +
-		"inclusive 1-based line range with start_line and end_line. Results are truncated " +
-		"when they exceed the configured byte limit."
+	return "Read a workspace text file. Prefer start_line/end_line for large files."
 }
 
 // InputSchema returns the tool input schema.
 func (t *ReadFileTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description"` +
-		`:"Workspace-relative path to read."},"start_line":{"type":"integer","minimum":1,` +
-		`"description":"Optional 1-based line number to start reading from, inclusive."},` +
-		`"end_line":{"type":"integer","minimum":1,"description":"Optional 1-based line ` +
-		`number to stop reading at, inclusive."}},"required":["path"],"additionalProperties":false}`)
+		`:"Workspace-relative file path."},"start_line":{"type":"integer","minimum":1,` +
+		`"description":"First 1-based line to read."},"end_line":{"type":"integer",` +
+		`"minimum":1,"description":"Last 1-based line to read."}},` +
+		`"required":["path"],"additionalProperties":false}`)
 }
 
 // Permission returns the default permission mode for this tool.

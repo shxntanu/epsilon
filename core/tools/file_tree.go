@@ -15,7 +15,7 @@ import (
 
 const (
 	defaultFileTreeMaxDepth   = 2
-	defaultFileTreeMaxEntries = 250
+	defaultFileTreeMaxEntries = 100
 )
 
 type fileTreeInput struct {
@@ -41,17 +41,16 @@ func (t *FileTreeTool) Name() string {
 }
 
 func (t *FileTreeTool) Description() string {
-	return "Return a bounded recursive tree for a workspace path. Use this to map a repo " +
-		"gradually before searching or reading specific files."
+	return "Return a bounded recursive tree for a workspace directory."
 }
 
 func (t *FileTreeTool) InputSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string",` +
-		`"description":"Workspace-relative directory path to map. Defaults to '.'."},` +
+		`"description":"Workspace-relative directory. Defaults to '.'."},` +
 		`"max_depth":{"type":"integer","minimum":1,"maximum":10,"description":` +
-		`"Maximum directory depth to include. Defaults to 2."},"max_entries":{` +
-		`"type":"integer","minimum":1,"maximum":2000,"description":"Maximum entries ` +
-		`to return. Defaults to 250."}},"additionalProperties":false}`)
+		`"Maximum depth. Defaults to 2."},"max_entries":{"type":"integer",` +
+		`"minimum":1,"maximum":2000,"description":"Maximum entries. Defaults to 100."}},` +
+		`"additionalProperties":false}`)
 }
 
 func (t *FileTreeTool) Permission() types.PermissionMode {

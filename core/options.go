@@ -161,8 +161,6 @@ func WithTools(toolList ...tools.Tool) Option {
 
 func WithDefaultTools(workspaceRoot string) Option {
 	return func(h *Harness) error {
-		echoTool := tools.NewEchoTool()
-
 		readFileTool, err := tools.NewReadFileTool(workspaceRoot)
 		if err != nil {
 			return fmt.Errorf("create read_file tool: %w", err)
@@ -203,7 +201,7 @@ func WithDefaultTools(workspaceRoot string) Option {
 			return fmt.Errorf("create apply_patch tool: %w", err)
 		}
 
-		return WithTools(echoTool, readFileTool, writeFileTool, grepTool, listDirTool,
+		return WithTools(readFileTool, writeFileTool, grepTool, listDirTool,
 			fileTreeTool, gitStatusTool, gitDiffTool, patchTool)(h)
 	}
 }

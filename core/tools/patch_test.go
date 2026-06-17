@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/shxntanu/epsilon/core/types"
@@ -111,6 +112,34 @@ func TestPatchToolAppliesAgentAddAndDeletePatch(t *testing.T) {
 	}
 	if _, err := os.Stat(deletePath); !os.IsNotExist(err) {
 		t.Fatalf("delete target still exists or stat failed: %v", err)
+	}
+}
+
+func TestPatchToolBoundsLargeDiffMetadata(t *testing.T) {
+	dir := t.TempDir()
+	tool, err := NewPatchTool(dir)
+	if err != nil {
+		t.Fatalf("new patch tool: %v", err)
+	}
+
+	var patch strings.Builder
+	patch.WriteString("*** Begin Patch\n")
+	patch.WriteString("*** Add File: large.txt\n")
+	for i := 0; i < 2000; i++ {
+		patch.WriteString("+0123456789abcdef\n")
+	}
+	patch.WriteString("*** End Patch\n")
+
+	result := runPatchTool(t, tool, patch.String())
+	if result.IsError {
+		t.Fatalf("patch failed: %s", result.Content[0].Text)
+	}
+	diff := result.Metadata["diff"]
+	if len(diff) > defaultPatchDiffMaxBytes {
+		t.Fatalf("diff metadata too large: %d", len(diff))
+	}
+	if !strings.Contains(diff, "diff omitted") {
+		t.Fatalf("expected omitted diff marker, got:\n%s", diff)
 	}
 }
 
