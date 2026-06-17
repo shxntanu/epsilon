@@ -81,6 +81,10 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		m.appendSlashMessage(result.Message)
 	case slash.ActionResumeChat:
 		return m.resumeChat(result.Session)
+	case slash.ActionRenameSession:
+		// TODO: wire to a harness capability once supported.
+		m.appendPlain(m.styles.error.Render("rename is not implemented"))
+		m.status = "ready"
 	case slash.ActionQuit:
 		return quitCmd()
 	default:
@@ -266,6 +270,7 @@ func selectorStyles(base styles) styles {
 		Foreground(lipgloss.Color("252")).
 		Bold(true)
 	base.selectorTitle = lipgloss.NewStyle().
+		Background(lipgloss.Color("234")).
 		Foreground(lipgloss.Color("146")).
 		Bold(true)
 	return base

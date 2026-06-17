@@ -29,16 +29,37 @@ func newChatBox() chatBox {
 	input.Focus()
 
 	styles := textarea.DefaultDarkStyles()
-	styles.Focused.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	styles.Focused.Base = styles.Focused.Base.Background(tuiBackground)
+	styles.Focused.Text = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(lipgloss.Color("252"))
 	styles.Focused.CursorLine = lipgloss.NewStyle().Background(lipgloss.Color("235"))
-	styles.Focused.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)
-	styles.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(lipgloss.Color("235"))
+	styles.Focused.Placeholder = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(lipgloss.Color("244")).
+		Italic(true)
+	styles.Focused.EndOfBuffer = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(lipgloss.Color("235"))
+	styles.Blurred.Base = styles.Blurred.Base.Background(tuiBackground)
+	styles.Blurred.Text = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(lipgloss.Color("252"))
+	styles.Blurred.CursorLine = lipgloss.NewStyle().Background(tuiBackground)
+	styles.Blurred.Placeholder = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(lipgloss.Color("244")).
+		Italic(true)
+	styles.Blurred.EndOfBuffer = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(lipgloss.Color("235"))
 	styles.Cursor.Color = lipgloss.Color("146")
 	input.SetStyles(styles)
 
 	return chatBox{
 		input: input,
 		style: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("241")).
 			Foreground(lipgloss.Color("252")).

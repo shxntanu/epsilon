@@ -159,7 +159,9 @@ func (h *Harness) ListSessions(ctx context.Context) ([]events.SessionInfo, error
 	h.mu.Lock()
 	for id := range h.sessions {
 		if _, ok := known[id]; !ok {
-			known[id] = events.SessionInfo{ID: id}
+			if h.sessions[id].HasMessages() {
+				known[id] = events.SessionInfo{ID: id}
+			}
 		}
 	}
 	h.mu.Unlock()

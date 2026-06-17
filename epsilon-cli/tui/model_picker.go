@@ -73,23 +73,30 @@ func (m *model) updateModelPicker(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch msg.Keystroke() {
 	case "ctrl+c":
-		return quitCmd()
+		return m.confirmQuit()
 	case "esc":
+		m.quitArmed = false
 		m.modelPicker = nil
 		m.status = "ready"
 		m.resize()
 	case "up", "ctrl+p":
+		m.quitArmed = false
 		m.moveModelSelection(-1)
 	case "down", "ctrl+n":
+		m.quitArmed = false
 		m.moveModelSelection(1)
 	case "backspace", "ctrl+h":
+		m.quitArmed = false
 		m.modelPicker.deleteQueryRune(currentString(m.currentModel))
 	case "ctrl+u":
+		m.quitArmed = false
 		m.modelPicker.query = ""
 		m.modelPicker.filter(currentString(m.currentModel))
 	case "enter":
+		m.quitArmed = false
 		m.applySelectedModel()
 	default:
+		m.quitArmed = false
 		if m.modelPicker.appendQueryText(msg.Key().Text, currentString(m.currentModel)) {
 			m.status = "models"
 		}

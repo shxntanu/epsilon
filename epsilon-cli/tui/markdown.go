@@ -25,14 +25,18 @@ func newMarkdownRenderer(width int) markdownRenderer {
 	return markdownRenderer{
 		width: max(20, width),
 		text: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Foreground(lipgloss.Color("252")),
 		heading: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Bold(true).
 			Foreground(lipgloss.Color("183")),
 		emphasis: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Italic(true).
 			Foreground(lipgloss.Color("252")),
 		strong: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Bold(true).
 			Foreground(lipgloss.Color("255")),
 		inlineCode: lipgloss.NewStyle().
@@ -46,18 +50,22 @@ func newMarkdownRenderer(width int) markdownRenderer {
 			BorderForeground(lipgloss.Color("103")).
 			Padding(0, 1),
 		codeLabel: lipgloss.NewStyle().
+			Background(lipgloss.Color("235")).
 			Foreground(lipgloss.Color("146")).
 			Bold(true),
 		quote: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Foreground(lipgloss.Color("246")).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderLeft(true).
 			BorderForeground(lipgloss.Color("244")).
 			PaddingLeft(1),
 		bullet: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Foreground(lipgloss.Color("146")).
 			Bold(true),
 		rule: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Foreground(lipgloss.Color("238")),
 	}
 }

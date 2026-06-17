@@ -32,19 +32,26 @@ func newPermissionPrompt(request types.PermissionRequest) permissionPrompt {
 		allow:   true,
 		styles: permissionPromptStyles{
 			box: lipgloss.NewStyle().
+				Background(tuiBackground).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(lipgloss.Color("242")).
 				Padding(0, 1),
 			title: lipgloss.NewStyle().
+				Background(tuiBackground).
 				Bold(true).
 				Foreground(lipgloss.Color("250")),
-			body:  lipgloss.NewStyle().Foreground(lipgloss.Color("248")),
-			muted: lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
+			body: lipgloss.NewStyle().
+				Background(tuiBackground).
+				Foreground(lipgloss.Color("248")),
+			muted: lipgloss.NewStyle().
+				Background(tuiBackground).
+				Foreground(lipgloss.Color("242")),
 			selected: lipgloss.NewStyle().
 				Foreground(lipgloss.Color("255")).
 				Background(lipgloss.Color("239")).
 				Padding(0, 1),
 			option: lipgloss.NewStyle().
+				Background(tuiBackground).
 				Foreground(lipgloss.Color("245")).
 				Padding(0, 1),
 		},

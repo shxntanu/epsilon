@@ -139,9 +139,11 @@ type model struct {
 	styles        styles
 	broker        *PermissionBroker
 	streaming     int
+	quitArmed     bool
 }
 
 type styles struct {
+	screen         lipgloss.Style
 	header         lipgloss.Style
 	title          lipgloss.Style
 	sessionID      lipgloss.Style
@@ -230,29 +232,48 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	}
 
 	styles := styles{
+		screen: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("252")),
 		header: lipgloss.NewStyle().
+			Background(tuiBackground).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderBottom(true).
 			BorderForeground(lipgloss.Color("238")).
 			Padding(0, 1),
-		title:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")),
-		sessionID: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		title: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Bold(true).
+			Foreground(lipgloss.Color("250")),
+		sessionID: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("244")),
 		status: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("250")).
 			Background(lipgloss.Color("237")).
 			Padding(0, 1),
-		help:       lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 1),
-		userLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("109")).Bold(true),
-		agentLabel: lipgloss.NewStyle().Foreground(lipgloss.Color("146")).Bold(true),
+		help: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("240")).
+			Padding(0, 1),
+		userLabel: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("109")).
+			Bold(true),
+		agentLabel: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("146")).
+			Bold(true),
 		userBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("236")).
+			Background(tuiBackground).
 			Padding(0, 1),
 		eventBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("246")).
 			Background(lipgloss.Color("235")).
 			Padding(0, 1),
 		statusLine: lipgloss.NewStyle().
+			Background(tuiBackground).
 			Foreground(lipgloss.Color("244")),
 		toolBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")).
@@ -268,13 +289,30 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			BorderLeft(true).
 			BorderForeground(lipgloss.Color("244")).
 			Padding(0, 1),
-		diffHeader: lipgloss.NewStyle().Foreground(lipgloss.Color("183")).Bold(true),
-		diffAdd:    lipgloss.NewStyle().Foreground(lipgloss.Color("120")),
-		diffRemove: lipgloss.NewStyle().Foreground(lipgloss.Color("210")),
-		diffMeta:   lipgloss.NewStyle().Foreground(lipgloss.Color("246")),
-		tool:       lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Bold(true),
-		error:      lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
-		muted:      lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		diffHeader: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("183")).
+			Bold(true),
+		diffAdd: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("120")),
+		diffRemove: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("210")),
+		diffMeta: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("246")),
+		tool: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("178")).
+			Bold(true),
+		error: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("203")).
+			Bold(true),
+		muted: lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(lipgloss.Color("244")),
 	}
 	styles = selectorStyles(styles)
 	spin := spinner.New(
@@ -357,9 +395,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.Keystroke() {
-		case "ctrl+c", "esc":
-			return m, quitCmd()
+		case "ctrl+c":
+			if cmd := m.confirmQuit(); cmd != nil {
+				return m, cmd
+			}
+		case "esc":
+			m.quitArmed = false
 		case "up", "ctrl+p":
+			m.quitArmed = false
 			if m.moveSlashSelection(-1) {
 				return m, nil
 			}
@@ -368,6 +411,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 			m.resize()
 		case "down", "ctrl+n":
+			m.quitArmed = false
 			if m.moveSlashSelection(1) {
 				return m, nil
 			}
@@ -376,6 +420,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 			m.resize()
 		case "tab":
+			m.quitArmed = false
 			if m.completeSlashSelection() {
 				return m, nil
 			}
@@ -384,27 +429,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 			m.resize()
 		case "pgup":
+			m.quitArmed = false
 			m.viewport.PageUp()
 			m.followOutput = false
 		case "pgdown":
+			m.quitArmed = false
 			m.viewport.PageDown()
 			m.followOutput = m.viewport.AtBottom()
 		case "ctrl+up", "ctrl+u":
+			m.quitArmed = false
 			m.viewport.HalfPageUp()
 			m.followOutput = false
 		case "ctrl+down", "ctrl+d":
+			m.quitArmed = false
 			m.viewport.HalfPageDown()
 			m.followOutput = m.viewport.AtBottom()
 		case "ctrl+o":
+			m.quitArmed = false
 			m.showEvents = !m.showEvents
 			m.dirty = true
 		case "ctrl+x":
+			m.quitArmed = false
 			m.showContext = !m.showContext
 			m.resize()
 		case "ctrl+t":
+			m.quitArmed = false
 			m.toggleDensity()
 			m.resize()
 		case "enter":
+			m.quitArmed = false
 			if m.completeIncompleteSlashInput() {
 				return m, nil
 			}
@@ -413,6 +466,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		default:
+			m.quitArmed = false
 			var cmd tea.Cmd
 			m.chatBox, cmd = m.chatBox.Update(msg)
 			cmds = append(cmds, cmd)
@@ -486,7 +540,7 @@ func (m model) View() tea.View {
 	)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	help := m.styles.help.Render("ctrl+o details:" + onOff(m.showEvents) +
-		" | ctrl+x context:" + onOff(m.showContext) + " | esc quit")
+		" | ctrl+x context:" + onOff(m.showContext) + " | ctrl+c twice quit")
 	contextLine := m.renderContextWidget()
 	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
 
@@ -509,9 +563,15 @@ func (m model) View() tea.View {
 	}
 	parts = append(parts, m.chatBox.View(), contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	content = m.styles.screen.
+		Width(max(0, m.width)).
+		Height(max(0, m.height)).
+		Render(content)
+	content = paintScreenBackground(content, m.width, m.height)
 
 	var view tea.View
 	view.SetContent(content)
+	view.BackgroundColor = tuiBackgroundColor
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	return view
@@ -866,12 +926,15 @@ func (m *model) completeAgentMessage(text string) {
 func (m *model) updatePermissionPrompt(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.Keystroke() {
 	case "ctrl+c":
-		return quitCmd()
+		return m.confirmQuit()
 	case "esc":
+		m.quitArmed = false
 		m.resolvePermission(types.PermissionDecisionDeny, "denied from TUI")
 	case "enter":
+		m.quitArmed = false
 		m.resolvePermission(m.permission.Decision(), m.permission.Reason())
 	default:
+		m.quitArmed = false
 		updated := m.permission.Update(msg)
 		m.permission = &updated
 		m.dirty = true
@@ -890,6 +953,17 @@ func (m *model) resolvePermission(decision types.PermissionDecision, reason stri
 	m.status = "thinking"
 	m.resize()
 	m.dirty = true
+}
+
+func (m *model) confirmQuit() tea.Cmd {
+	if m.quitArmed {
+		return quitCmd()
+	}
+
+	m.quitArmed = true
+	m.status = "press ctrl+c again to quit"
+	m.appendStatus("Press ctrl+c again to quit, or type /exit.")
+	return nil
 }
 
 func (m *model) syncViewport() {

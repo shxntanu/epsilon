@@ -78,23 +78,30 @@ func (m *model) updateSessionPicker(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch msg.Keystroke() {
 	case "ctrl+c":
-		return quitCmd()
+		return m.confirmQuit()
 	case "esc":
+		m.quitArmed = false
 		m.sessionPicker = nil
 		m.status = "ready"
 		m.resize()
 	case "up", "ctrl+p":
+		m.quitArmed = false
 		m.moveSessionSelection(-1)
 	case "down", "ctrl+n":
+		m.quitArmed = false
 		m.moveSessionSelection(1)
 	case "backspace", "ctrl+h":
+		m.quitArmed = false
 		m.sessionPicker.deleteQueryRune(m.session.ID())
 	case "ctrl+u":
+		m.quitArmed = false
 		m.sessionPicker.query = ""
 		m.sessionPicker.filter(m.session.ID())
 	case "enter":
+		m.quitArmed = false
 		return m.applySelectedSession()
 	default:
+		m.quitArmed = false
 		if m.sessionPicker.appendQueryText(msg.Key().Text, m.session.ID()) {
 			m.status = "sessions"
 		}

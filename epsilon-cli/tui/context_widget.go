@@ -61,8 +61,16 @@ func (w contextWidget) View() string {
 func (w contextWidget) Panel() string {
 	width := max(contextPanelMinWidth, w.width)
 	innerWidth := max(20, width-4)
+	headingStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("234")).
+		Bold(true).
+		Foreground(lipgloss.Color("250"))
+	subheadingStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("234")).
+		Foreground(lipgloss.Color("146")).
+		Bold(true)
 	lines := []string{
-		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Render("Context"),
+		headingStyle.Render("Context"),
 		fmt.Sprintf("%.1f%% used", w.summary.PercentUsed*100),
 		fmt.Sprintf("%d / %d tokens", w.summary.UsedTokens, w.summary.MaxTokens),
 		fmt.Sprintf("%d tokens left", w.summary.RemainingTokens),
@@ -71,14 +79,13 @@ func (w contextWidget) Panel() string {
 	}
 
 	if w.model != nil {
-		lines = append(lines, "", lipgloss.NewStyle().
-			Foreground(lipgloss.Color("146")).Bold(true).Render("Model"))
+		lines = append(lines, "", subheadingStyle.Render("Model"))
 		lines = append(lines, modelLines(*w.model)...)
 	}
 
 	lines = append(lines,
 		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("146")).Bold(true).Render("Breakdown"),
+		subheadingStyle.Render("Breakdown"),
 	)
 
 	for _, bucket := range w.summary.Buckets {
@@ -88,7 +95,7 @@ func (w contextWidget) Panel() string {
 	if len(w.summary.Segments) > 0 {
 		lines = append(lines, "")
 		lines = append(lines,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("146")).Bold(true).Render("Recent"))
+			subheadingStyle.Render("Recent"))
 		for _, segment := range recentSegments(w.summary.Segments, 5) {
 			lines = append(lines, segmentLine(segment, innerWidth))
 		}

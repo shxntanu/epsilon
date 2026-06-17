@@ -21,6 +21,7 @@ const (
 	ActionSetModel        Action = "set_model"
 	ActionSetEffort       Action = "set_effort"
 	ActionPickSession     Action = "pick_session"
+	ActionRenameSession   Action = "rename_session"
 	ActionResumeChat      Action = "resume_chat"
 	ActionQuit            Action = "quit"
 )
@@ -211,6 +212,35 @@ func NewDefaultRegistry() *Registry {
 		},
 	})
 	registry.Register(Command{
+		Name:        "rename",
+		Aliases:     []string{"title"},
+		Usage:       "/rename <session-id> <title...>",
+		Description: "rename a persisted session",
+		Handler: func(_ context.Context, exec Execution) (Result, error) {
+			args := strings.TrimSpace(exec.Args)
+			if args == "" {
+				return Result{}, fmt.Errorf("usage: /rename <session-id> <title...>")
+			}
+
+			sessionID, title, ok := strings.Cut(args, " ")
+			if !ok {
+				return Result{}, fmt.Errorf("usage: /rename <session-id> <title...>")
+			}
+			sessionID = strings.TrimSpace(sessionID)
+			title = strings.TrimSpace(title)
+			if sessionID == "" || title == "" {
+				return Result{}, fmt.Errorf("usage: /rename <session-id> <title...>")
+			}
+
+			return Result{
+				Action:  ActionRenameSession,
+				Session: sessionID,
+				Message: "renaming " + sessionID,
+				Model:   title, // reuse existing field for the title payload
+			}, nil
+		},
+	})
+	registry.Register(Command{
 		Name:        "status",
 		Usage:       "/status",
 		Description: "show session and runtime state",
@@ -219,9 +249,9 @@ func NewDefaultRegistry() *Registry {
 		},
 	})
 	registry.Register(Command{
-		Name:        "quit",
-		Aliases:     []string{"exit"},
-		Usage:       "/quit",
+		Name:        "exit",
+		Aliases:     []string{"quit"},
+		Usage:       "/exit",
 		Description: "quit epsilon",
 		Handler: func(context.Context, Execution) (Result, error) {
 			return Result{Action: ActionQuit}, nil

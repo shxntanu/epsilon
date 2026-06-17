@@ -16,17 +16,26 @@ func TestJSONLStoreListSessions(t *testing.T) {
 
 	if err := store.Append(context.Background(), types.Event{
 		SessionID: "session_a",
-		Kind:      types.EventSessionStarted,
+		Kind:      types.EventUserMessageAdded,
 		CreatedAt: time.Now().UTC(),
+		Message:   &types.Message{Role: types.RoleUser, Content: []types.ContentPart{types.TextPart("hello")}},
 	}); err != nil {
 		t.Fatalf("append session a: %v", err)
 	}
 	if err := store.Append(context.Background(), types.Event{
 		SessionID: "session_b",
+		Kind:      types.EventModelMessageCompleted,
+		CreatedAt: time.Now().UTC(),
+		Message:   &types.Message{Role: types.RoleAssistant, Content: []types.ContentPart{types.TextPart("hi")}},
+	}); err != nil {
+		t.Fatalf("append session b: %v", err)
+	}
+	if err := store.Append(context.Background(), types.Event{
+		SessionID: "session_empty",
 		Kind:      types.EventSessionStarted,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		t.Fatalf("append session b: %v", err)
+		t.Fatalf("append empty session: %v", err)
 	}
 
 	sessions, err := store.ListSessions(context.Background())

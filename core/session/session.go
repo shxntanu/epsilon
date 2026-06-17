@@ -71,13 +71,12 @@ func (s *Session) ID() string {
 	return s.id
 }
 
-// Start emits the session-started event.
+// Start initializes the session. Session creation stays in memory until the
+// first user/model/tool event so empty sessions are not persisted.
 func (s *Session) Start(ctx context.Context) error {
-	_, err := s.bus.Publish(ctx, types.NewSessionStartedEvent(time.Now().UTC()))
-	if err != nil {
-		return fmt.Errorf("publish session started event: %w", err)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("start session: %w", err)
 	}
-
 	return nil
 }
 
@@ -152,6 +151,12 @@ func (s *Session) Messages() []types.Message {
 	return messages
 }
 
+func (s *Session) HasMessages() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.messages) > 0
+}
+
 func (s *Session) ContextSummary(tracker *contextwindow.Tracker) contextwindow.Summary {
 	if tracker == nil {
 		tracker = contextwindow.DefaultTracker()
@@ -166,10 +171,14 @@ func (s *Session) Close(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
+	hasMessages := len(s.messages) > 0
 	s.closed = true
 	s.mu.Unlock()
 
 	defer s.bus.Close()
+	if !hasMessages {
+		return nil
+	}
 
 	_, err := s.bus.Publish(ctx, types.Event{
 		Kind:      types.EventSessionCompleted,

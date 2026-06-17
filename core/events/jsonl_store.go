@@ -153,6 +153,11 @@ func (s *JSONLStore) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("stat session events: %w", err)
 		}
+		if ok, err := s.hasConversationEvents(ctx, sessionID); err != nil {
+			return nil, err
+		} else if !ok {
+			continue
+		}
 
 		sessions = append(sessions, SessionInfo{
 			ID:        sessionID,
@@ -167,6 +172,21 @@ func (s *JSONLStore) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 		return sessions[i].ID < sessions[j].ID
 	})
 	return sessions, nil
+}
+
+func (s *JSONLStore) hasConversationEvents(ctx context.Context, sessionID string) (bool, error) {
+	history, err := s.Load(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, event := range history {
+		switch event.Kind {
+		case types.EventUserMessageAdded, types.EventModelMessageCompleted,
+			types.EventToolCallCompleted:
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // BaseDir returns the absolute event store directory.

@@ -162,6 +162,31 @@ func TestDefaultRegistryActions(t *testing.T) {
 	if !handled || result.Action != ActionResumeChat || result.Session != "session_123" {
 		t.Fatalf("resume result = %#v, handled %v", result, handled)
 	}
+
+	result, handled, err = registry.Execute(context.Background(), "/rename session_123 hello world",
+		Execution{})
+	if err != nil {
+		t.Fatalf("execute rename: %v", err)
+	}
+	if !handled || result.Action != ActionRenameSession || result.Session != "session_123" || result.Model != "hello world" {
+		t.Fatalf("rename result = %#v, handled %v", result, handled)
+	}
+
+	result, handled, err = registry.Execute(context.Background(), "/exit", Execution{})
+	if err != nil {
+		t.Fatalf("execute exit: %v", err)
+	}
+	if !handled || result.Action != ActionQuit {
+		t.Fatalf("exit result = %#v, handled %v", result, handled)
+	}
+
+	result, handled, err = registry.Execute(context.Background(), "/quit", Execution{})
+	if err != nil {
+		t.Fatalf("execute quit alias: %v", err)
+	}
+	if !handled || result.Action != ActionQuit {
+		t.Fatalf("quit alias result = %#v, handled %v", result, handled)
+	}
 }
 
 func TestUnknownCommand(t *testing.T) {
