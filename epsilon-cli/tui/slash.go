@@ -38,7 +38,7 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		}
 	case slash.ActionSetEvents:
 		m.showEvents = result.Bool
-		m.status = "events:" + onOff(m.showEvents)
+		m.status = "details:" + onOff(m.showEvents)
 		m.appendSlashMessage(result.Message)
 	case slash.ActionSetDensity:
 		m.density = densityModeFromSlash(result.Density)

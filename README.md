@@ -108,7 +108,7 @@ Type `/` in the composer to open the fuzzy command selector. Use up/down to move
 | ------------------------------------------- | --------------------------------------------------- |
 | `/help`                                     | Show available slash commands.                      |
 | `/clear`                                    | Clear the visible transcript.                       |
-| `/events [on\|off\|toggle]`                 | Show or hide event entries.                         |
+| `/details [on\|off\|toggle]`                | Show or hide tool and event details.                |
 | `/density [comfortable\|compact\|toggle]`   | Switch transcript density.                          |
 | `/model [name]`                             | Pick a model from the provider or set one manually. |
 | `/effort [minimal\|low\|medium\|high\|off]` | Show, set, or clear model effort.                   |

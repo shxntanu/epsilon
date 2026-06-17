@@ -117,18 +117,19 @@ func NewDefaultRegistry() *Registry {
 		},
 	})
 	registry.Register(Command{
-		Name:        "events",
-		Usage:       "/events [on|off|toggle]",
-		Description: "show or hide event entries",
+		Name:        "details",
+		Aliases:     []string{"events"},
+		Usage:       "/details [on|off|toggle]",
+		Description: "show or hide tool and event details",
 		Handler: func(_ context.Context, exec Execution) (Result, error) {
-			value, err := parseToggle(exec.Args, exec.State.EventsVisible, "events")
+			value, err := parseToggle(exec.Args, exec.State.EventsVisible, "details")
 			if err != nil {
 				return Result{}, err
 			}
 			return Result{
 				Action:  ActionSetEvents,
 				Bool:    value,
-				Message: "events " + onOff(value),
+				Message: "details " + onOff(value),
 			}, nil
 		},
 	})
@@ -477,7 +478,7 @@ func renderStatus(exec Execution) string {
 		"Status",
 		"session: " + exec.SessionID,
 		"state: " + state,
-		"events: " + onOff(exec.State.EventsVisible),
+		"details: " + onOff(exec.State.EventsVisible),
 		"density: " + string(exec.State.Density),
 		"model: " + model,
 		"effort: " + effort,

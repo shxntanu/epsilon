@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/slash"
@@ -60,6 +63,40 @@ func TestDensityModeFromSlash(t *testing.T) {
 	}
 	if got := slashDensity(densityComfortable); got != slash.DensityComfortable {
 		t.Fatalf("comfortable density = %v, want comfortable", got)
+	}
+}
+
+func TestRenderToolEntryHidesDetailsUntilExpanded(t *testing.T) {
+	m := model{
+		width:   80,
+		density: densityComfortable,
+		styles: styles{
+			tool:      lipgloss.NewStyle(),
+			error:     lipgloss.NewStyle(),
+			muted:     lipgloss.NewStyle(),
+			toolBlock: lipgloss.NewStyle(),
+		},
+	}
+	entry := transcriptEntry{
+		kind:       transcriptTool,
+		text:       "Used read_file",
+		toolName:   "read_file",
+		toolInput:  `{"path":"README.md"}`,
+		toolResult: "project docs",
+		toolMeta:   map[string]string{"path": "README.md"},
+	}
+
+	collapsed := m.renderToolEntry(entry)
+	if strings.Contains(collapsed, "project docs") || strings.Contains(collapsed, `"path"`) {
+		t.Fatalf("collapsed tool entry leaked details:\n%s", collapsed)
+	}
+
+	m.showEvents = true
+	expanded := m.renderToolEntry(entry)
+	for _, want := range []string{"Used read_file", `{"path":"README.md"}`, "project docs"} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expanded tool entry missing %q:\n%s", want, expanded)
+		}
 	}
 }
 

@@ -151,6 +151,8 @@ type styles struct {
 	agentLabel     lipgloss.Style
 	userBlock      lipgloss.Style
 	eventBlock     lipgloss.Style
+	statusLine     lipgloss.Style
+	toolBlock      lipgloss.Style
 	diffBlock      lipgloss.Style
 	diffHeader     lipgloss.Style
 	diffAdd        lipgloss.Style
@@ -172,11 +174,20 @@ const (
 	transcriptAgent
 	transcriptEvent
 	transcriptDiff
+	transcriptStatus
+	transcriptTool
 )
 
 type transcriptEntry struct {
-	kind transcriptEntryKind
-	text string
+	kind       transcriptEntryKind
+	text       string
+	toolCallID string
+	toolName   string
+	toolInput  string
+	toolResult string
+	toolMeta   map[string]string
+	toolError  bool
+	toolActive bool
 }
 
 type densityMode int
@@ -240,6 +251,15 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		eventBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("246")).
 			Background(lipgloss.Color("235")).
+			Padding(0, 1),
+		statusLine: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")),
+		toolBlock: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Background(lipgloss.Color("235")).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderLeft(true).
+			BorderForeground(lipgloss.Color("178")).
 			Padding(0, 1),
 		diffBlock: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252")).
@@ -409,6 +429,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addEvent(event)
 		}
 		cmds = append(cmds, m.waitForEvent())
+		if m.showSpinner || m.hasActiveTools() {
+			cmds = append(cmds, m.spinner.Tick)
+		}
 	case eventStreamClosedMsg:
 		if msg.sessionID == m.session.ID() {
 			m.status = "event stream closed"
@@ -422,7 +445,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case spinner.TickMsg:
-		if m.showSpinner {
+		if m.showSpinner || m.hasActiveTools() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			m.dirty = true
@@ -462,7 +485,7 @@ func (m model) View() tea.View {
 		m.styles.status.Render(m.status),
 	)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
-	help := m.styles.help.Render("ctrl+o events:" + onOff(m.showEvents) +
+	help := m.styles.help.Render("ctrl+o details:" + onOff(m.showEvents) +
 		" | ctrl+x context:" + onOff(m.showContext) + " | esc quit")
 	contextLine := m.renderContextWidget()
 	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
@@ -636,7 +659,7 @@ func (m *model) addEvent(event types.Event) {
 		if m.busy {
 			m.showSpinner = true
 		}
-		m.appendEvent(m.styles.muted.Render("agent started"))
+		m.appendStatus("Thinking about the next step")
 	case types.EventModelTextDelta:
 		if event.TextDelta != "" {
 			m.showSpinner = false
@@ -650,30 +673,23 @@ func (m *model) addEvent(event types.Event) {
 				m.completeAgentMessage(text)
 			}
 			for _, call := range event.Message.ToolCalls {
-				m.appendEvent(m.styles.tool.Render("tool requested") + ": " +
-					call.Name + " " + string(call.Input))
+				m.appendToolRequested(call)
 			}
 		}
 	case types.EventToolCallStarted:
 		if event.ToolCall != nil {
-			m.appendEvent(m.styles.tool.Render("tool started") + ": " + event.ToolCall.Name)
+			m.markToolStarted(*event.ToolCall)
 		}
 	case types.EventToolCallCompleted:
 		if event.ToolCall != nil && event.ToolResult != nil {
 			if diff := event.ToolResult.Metadata["diff"]; diff != "" && !event.ToolResult.IsError {
 				m.appendDiff(diff)
 			}
-			line := m.styles.tool.Render("tool completed") + ": " +
-				event.ToolCall.Name + " -> " + textFromContent(event.ToolResult.Content)
-			if metadata := formatMetadata(event.ToolResult.Metadata); metadata != "" {
-				line += " " + m.styles.muted.Render(metadata)
-			}
-			m.appendEvent(line)
+			m.markToolCompleted(*event.ToolCall, *event.ToolResult)
 		}
 	case types.EventPermissionRequested:
 		if event.Permission != nil {
-			m.appendEvent(m.styles.tool.Render("permission requested") + ": " +
-				event.Permission.Request.ToolName)
+			m.appendStatus("Waiting for approval to use " + event.Permission.Request.ToolName)
 			if m.broker != nil {
 				prompt := newPermissionPrompt(event.Permission.Request)
 				prompt.SetWidth(m.width)
@@ -684,7 +700,7 @@ func (m *model) addEvent(event types.Event) {
 		}
 	case types.EventPermissionGranted, types.EventPermissionDenied:
 		if event.Permission != nil {
-			m.appendEvent(m.styles.tool.Render(string(event.Kind)) + ": " +
+			m.appendStatus(strings.ReplaceAll(string(event.Kind), "_", " ") + ": " +
 				event.Permission.Reason)
 			m.permission = nil
 			m.resize()
@@ -710,6 +726,81 @@ func (m *model) appendEvent(line string) {
 		text: line,
 	})
 	m.dirty = true
+}
+
+func (m *model) appendStatus(text string) {
+	m.entries = append(m.entries, transcriptEntry{
+		kind: transcriptStatus,
+		text: text,
+	})
+	m.dirty = true
+}
+
+func (m *model) appendToolRequested(call types.ToolCall) {
+	m.entries = append(m.entries, transcriptEntry{
+		kind:       transcriptTool,
+		text:       toolRequestedText(call.Name),
+		toolCallID: call.ID,
+		toolName:   call.Name,
+		toolInput:  strings.TrimSpace(string(call.Input)),
+	})
+	m.dirty = true
+}
+
+func (m *model) markToolStarted(call types.ToolCall) {
+	index := m.findToolEntry(call.ID)
+	if index < 0 {
+		m.appendToolRequested(call)
+		index = len(m.entries) - 1
+	}
+	m.entries[index].text = toolRunningText(call.Name)
+	m.entries[index].toolActive = true
+	m.entries[index].toolName = call.Name
+	if strings.TrimSpace(m.entries[index].toolInput) == "" {
+		m.entries[index].toolInput = strings.TrimSpace(string(call.Input))
+	}
+	m.dirty = true
+}
+
+func (m *model) markToolCompleted(call types.ToolCall, result types.ToolResult) {
+	index := m.findToolEntry(call.ID)
+	if index < 0 {
+		m.appendToolRequested(call)
+		index = len(m.entries) - 1
+	}
+	m.entries[index].toolActive = false
+	m.entries[index].toolName = call.Name
+	m.entries[index].toolInput = strings.TrimSpace(string(call.Input))
+	m.entries[index].toolResult = textFromContent(result.Content)
+	m.entries[index].toolMeta = result.Metadata
+	m.entries[index].toolError = result.IsError
+	if result.IsError {
+		m.entries[index].text = "Tool failed: " + call.Name
+	} else {
+		m.entries[index].text = toolCompletedText(call.Name)
+	}
+	m.dirty = true
+}
+
+func (m model) findToolEntry(callID string) int {
+	if callID == "" {
+		return -1
+	}
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].kind == transcriptTool && m.entries[i].toolCallID == callID {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m model) hasActiveTools() bool {
+	for _, entry := range m.entries {
+		if entry.kind == transcriptTool && entry.toolActive {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *model) appendDiff(diff string) {
@@ -848,6 +939,10 @@ func (m model) renderTranscriptEntry(entry transcriptEntry) (string, bool) {
 		return m.renderEvent(entry.text), true
 	case transcriptDiff:
 		return m.renderDiff(entry.text), true
+	case transcriptStatus:
+		return m.renderStatusEntry(entry), true
+	case transcriptTool:
+		return m.renderToolEntry(entry), true
 	default:
 		return entry.text, true
 	}
@@ -858,7 +953,7 @@ func (m model) renderAgentMessage(text string) string {
 }
 
 func (m model) renderSpinnerMessage() string {
-	responding := m.spinner.View() + " " + m.styles.muted.Render("responding")
+	responding := m.spinner.View() + " " + m.styles.muted.Render("Thinking")
 	return m.harnessMessage().RenderSpinner(responding)
 }
 
@@ -885,6 +980,39 @@ func (m model) renderEvent(text string) string {
 	}
 
 	return m.styles.eventBlock.Width(m.messageWidth()).Render(text)
+}
+
+func (m model) renderStatusEntry(entry transcriptEntry) string {
+	line := m.styles.statusLine.Render(entry.text)
+	if m.density == densityCompact {
+		return line
+	}
+	return m.styles.statusLine.Width(m.messageWidth()).Render(line)
+}
+
+func (m model) renderToolEntry(entry transcriptEntry) string {
+	title := entry.text
+	if entry.toolActive {
+		title = m.spinner.View() + " " + title
+	}
+	if entry.toolError {
+		title = m.styles.error.Render(title)
+	} else {
+		title = m.styles.tool.Render(title)
+	}
+
+	lines := []string{title}
+	if m.showEvents {
+		if detail := renderToolDetails(entry, m.styles.muted, m.styles.error); detail != "" {
+			lines = append(lines, detail)
+		}
+	}
+
+	body := strings.Join(lines, "\n")
+	if m.density == densityCompact {
+		return body
+	}
+	return m.styles.toolBlock.Width(m.messageWidth()).Render(body)
 }
 
 func (m model) renderDiff(diff string) string {
@@ -973,6 +1101,36 @@ func formatMetadata(metadata map[string]string) string {
 		return ""
 	}
 	return string(data)
+}
+
+func renderToolDetails(entry transcriptEntry, muted lipgloss.Style, errorStyle lipgloss.Style) string {
+	lines := make([]string, 0, 4)
+	if entry.toolInput != "" {
+		lines = append(lines, muted.Render("input: ")+entry.toolInput)
+	}
+	if entry.toolResult != "" {
+		label := muted.Render("result: ")
+		if entry.toolError {
+			label = errorStyle.Render("result: ")
+		}
+		lines = append(lines, label+entry.toolResult)
+	}
+	if metadata := formatMetadata(entry.toolMeta); metadata != "" {
+		lines = append(lines, muted.Render("metadata: ")+metadata)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func toolRequestedText(name string) string {
+	return "Preparing to use " + name
+}
+
+func toolRunningText(name string) string {
+	return "Using " + name
+}
+
+func toolCompletedText(name string) string {
+	return "Used " + name
 }
 
 func textFromContent(content []types.ContentPart) string {
