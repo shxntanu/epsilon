@@ -178,11 +178,32 @@ func WithDefaultTools(workspaceRoot string) Option {
 			return fmt.Errorf("create grep_search tool: %w", err)
 		}
 
+		listDirTool, err := tools.NewListDirTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create list_dir tool: %w", err)
+		}
+
+		fileTreeTool, err := tools.NewFileTreeTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create file_tree tool: %w", err)
+		}
+
+		gitStatusTool, err := tools.NewGitStatusTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create git_status tool: %w", err)
+		}
+
+		gitDiffTool, err := tools.NewGitDiffTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create git_diff tool: %w", err)
+		}
+
 		patchTool, err := tools.NewPatchTool(workspaceRoot)
 		if err != nil {
 			return fmt.Errorf("create apply_patch tool: %w", err)
 		}
 
-		return WithTools(echoTool, readFileTool, writeFileTool, grepTool, patchTool)(h)
+		return WithTools(echoTool, readFileTool, writeFileTool, grepTool, listDirTool,
+			fileTreeTool, gitStatusTool, gitDiffTool, patchTool)(h)
 	}
 }
