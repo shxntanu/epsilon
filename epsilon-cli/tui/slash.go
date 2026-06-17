@@ -166,7 +166,7 @@ func densityModeFromSlash(density slash.Density) densityMode {
 }
 
 func (m model) slashSelectorState() (string, []slash.Match, bool) {
-	query, ok := slashSelectorQuery(m.chatBox.Value())
+	query, ok := slashSelectorQuery(m.composer.Value())
 	if !ok || m.slash == nil {
 		return "", nil, false
 	}
@@ -253,7 +253,7 @@ func (m *model) completeSlashSelection() bool {
 	}
 
 	selected := m.clampedSlashCursor(len(matches))
-	m.chatBox.SetValue("/" + matches[selected].Command.Name + " ")
+	m.composer.SetValue("/" + matches[selected].Command.Name + " ")
 	m.slashCursor = 0
 	m.resize()
 	return true

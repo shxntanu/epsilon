@@ -13,13 +13,14 @@ const (
 	comfortableChatBoxInputHeight = 5
 )
 
-type chatBox struct {
+// composer is used to compose messages, run slash commands, etc.
+type composer struct {
 	input textarea.Model
 	width int
 	style lipgloss.Style
 }
 
-func newChatBox() chatBox {
+func newComposer() composer {
 	input := textarea.New()
 	input.Placeholder = "Message epsilon..."
 	input.Prompt = ""
@@ -56,7 +57,7 @@ func newChatBox() chatBox {
 	styles.Cursor.Color = lipgloss.Color("146")
 	input.SetStyles(styles)
 
-	return chatBox{
+	return composer{
 		input: input,
 		style: lipgloss.NewStyle().
 			Background(tuiBackground).
@@ -67,11 +68,11 @@ func newChatBox() chatBox {
 	}
 }
 
-func (c chatBox) Init() tea.Cmd {
+func (c composer) Init() tea.Cmd {
 	return c.input.Focus()
 }
 
-func (c chatBox) Update(msg tea.Msg) (chatBox, tea.Cmd) {
+func (c composer) Update(msg tea.Msg) (composer, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.Keystroke() {
 		case "shift+enter", "alt+enter", "ctrl+j":
@@ -85,25 +86,25 @@ func (c chatBox) Update(msg tea.Msg) (chatBox, tea.Cmd) {
 	return c, cmd
 }
 
-func (c chatBox) View() string {
+func (c composer) View() string {
 	return c.style.Width(max(0, c.width-4)).Render(c.input.View())
 }
 
-func (c chatBox) Value() string {
+func (c composer) Value() string {
 	return c.input.Value()
 }
 
-func (c *chatBox) SetValue(value string) {
+func (c *composer) SetValue(value string) {
 	c.input.SetValue(value)
 	c.input.CursorEnd()
 }
 
-func (c *chatBox) SetWidth(width int) {
+func (c *composer) SetWidth(width int) {
 	c.width = width
 	c.input.SetWidth(max(20, width-8))
 }
 
-func (c *chatBox) SetDensity(density densityMode) {
+func (c *composer) SetDensity(density densityMode) {
 	height := comfortableChatBoxInputHeight
 	if density == densityCompact {
 		height = compactChatBoxInputHeight
@@ -111,11 +112,11 @@ func (c *chatBox) SetDensity(density densityMode) {
 	c.input.SetHeight(height)
 }
 
-func (c chatBox) Height() int {
+func (c composer) Height() int {
 	return c.input.Height() + 2
 }
 
-func (c *chatBox) Submit() (string, bool) {
+func (c *composer) Submit() (string, bool) {
 	text := strings.TrimSpace(c.input.Value())
 	if text == "" {
 		return "", false

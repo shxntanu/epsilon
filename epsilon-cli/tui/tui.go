@@ -120,7 +120,7 @@ type model struct {
 	session       *session.Session
 	subscription  *events.Subscription
 	events        <-chan types.Event
-	chatBox       chatBox
+	composer      composer
 	slash         *slash.Registry
 	slashCursor   int
 	spinner       spinner.Model
@@ -361,7 +361,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		session:       sess,
 		subscription:  sub,
 		events:        eventStream,
-		chatBox:       newChatBox(),
+		composer:      newComposer(),
 		slash:         slashRegistry,
 		spinner:       spin,
 		viewport:      vp,
@@ -382,14 +382,14 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		styles:        styles,
 		broker:        broker,
 		streaming:     -1,
-		entries:      entries,
-		dirty:        true,
-		followOutput: true,
+		entries:       entries,
+		dirty:         true,
+		followOutput:  true,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.chatBox.Init(), m.waitForEvent())
+	return tea.Batch(m.composer.Init(), m.waitForEvent())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -439,7 +439,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			var cmd tea.Cmd
-			m.chatBox, cmd = m.chatBox.Update(msg)
+			m.composer, cmd = m.composer.Update(msg)
 			cmds = append(cmds, cmd)
 			m.resize()
 		case "down", "ctrl+n":
@@ -448,7 +448,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			var cmd tea.Cmd
-			m.chatBox, cmd = m.chatBox.Update(msg)
+			m.composer, cmd = m.composer.Update(msg)
 			cmds = append(cmds, cmd)
 			m.resize()
 		case "tab":
@@ -457,7 +457,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			var cmd tea.Cmd
-			m.chatBox, cmd = m.chatBox.Update(msg)
+			m.composer, cmd = m.composer.Update(msg)
 			cmds = append(cmds, cmd)
 			m.resize()
 		case "pgup":
@@ -509,7 +509,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.quitArmed = false
 			var cmd tea.Cmd
-			m.chatBox, cmd = m.chatBox.Update(msg)
+			m.composer, cmd = m.composer.Update(msg)
 			cmds = append(cmds, cmd)
 			m.resize()
 		}
@@ -561,7 +561,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.viewport, cmd = m.viewport.Update(msg)
 		cmds = append(cmds, cmd)
-		m.chatBox, cmd = m.chatBox.Update(msg)
+		m.composer, cmd = m.composer.Update(msg)
 		cmds = append(cmds, cmd)
 		m.resize()
 	}
@@ -603,7 +603,7 @@ func (m model) View() tea.View {
 	if picker, ok := m.renderSessionPicker(); ok {
 		parts = append(parts, picker)
 	}
-	parts = append(parts, m.chatBox.View(), contextLine, help, bottomGutter)
+	parts = append(parts, m.composer.View(), contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	content = m.styles.screen.
 		Width(max(0, m.width)).
@@ -650,8 +650,8 @@ func (m model) mouseLabel() string {
 func (m *model) resize() {
 	headerHeight := 2
 	helpHeight := 2
-	m.chatBox.SetDensity(m.density)
-	m.chatBox.SetWidth(m.width)
+	m.composer.SetDensity(m.density)
+	m.composer.SetWidth(m.width)
 	permissionHeight := 0
 	if m.permission != nil {
 		m.permission.SetWidth(m.width)
@@ -660,7 +660,7 @@ func (m *model) resize() {
 	selectorHeight := m.slashSelectorHeight()
 	modelPickerHeight := m.modelPickerHeight()
 	sessionPickerHeight := m.sessionPickerHeight()
-	viewportHeight := max(3, m.height-headerHeight-m.chatBox.Height()-helpHeight-
+	viewportHeight := max(3, m.height-headerHeight-m.composer.Height()-helpHeight-
 		permissionHeight-selectorHeight-modelPickerHeight-sessionPickerHeight-bottomGutterHeight)
 	viewportWidth := max(20, m.width-m.contextPanelWidth())
 
@@ -717,7 +717,7 @@ func (m *model) submit() tea.Cmd {
 		return nil
 	}
 
-	text, ok := m.chatBox.Submit()
+	text, ok := m.composer.Submit()
 	if !ok {
 		return nil
 	}
