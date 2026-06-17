@@ -130,14 +130,14 @@ func (m *model) applySelectedSession() tea.Cmd {
 	if len(visible) == 0 {
 		return nil
 	}
-	sessionID := visible[m.clampedSessionCursor()].ID
+	selected := visible[m.clampedSessionCursor()]
 	m.sessionPicker = nil
 	m.resize()
-	return m.resumeChat(sessionID)
+	return m.resumeChat(selected)
 }
 
-func (m *model) resumeChat(sessionID string) tea.Cmd {
-	sessionID = strings.TrimSpace(sessionID)
+func (m *model) resumeChat(sessionInfo events.SessionInfo) tea.Cmd {
+	sessionID := strings.TrimSpace(sessionInfo.ID)
 	if sessionID == "" {
 		m.appendPlain(m.styles.error.Render("session ID is empty"))
 		return nil
@@ -164,7 +164,12 @@ func (m *model) resumeChat(sessionID string) tea.Cmd {
 		if err != nil {
 			return resumeSessionMsg{sessionID: sessionID, err: err}
 		}
-		return resumeSessionMsg{sessionID: sessionID, session: sess, sub: sub}
+		return resumeSessionMsg{
+			sessionID: sessionID,
+			title:     strings.TrimSpace(sessionInfo.Title),
+			session:   sess,
+			sub:       sub,
+		}
 	}
 }
 
@@ -198,6 +203,7 @@ func (m *model) applyResumeSession(msg resumeSessionMsg) tea.Cmd {
 	m.showSpinner = false
 	m.busy = false
 	m.status = "ready"
+	m.sessionTitle = strings.TrimSpace(msg.title)
 	m.followOutput = true
 	m.contextView = func() contextwindow.Summary {
 		return msg.session.ContextSummary(nil)
@@ -314,7 +320,7 @@ func (p *sessionPicker) filter(current string) {
 
 	matches := make([]scoredSession, 0, len(p.sessions))
 	for i, sess := range p.sessions {
-		score := fuzzyTextScore(strings.ToLower(sess.ID), query)
+		score := fuzzyTextScore(strings.ToLower(sessionSearchText(sess)), query)
 		if score <= 0 {
 			continue
 		}
@@ -357,9 +363,23 @@ func selectedSessionCursor(sessions []events.SessionInfo, current string) int {
 }
 
 func formatSessionRow(sessionInfo events.SessionInfo, current string, width int) string {
-	parts := []string{sessionInfo.ID}
+	parts := []string{sessionRowLabel(sessionInfo)}
 	if sessionInfo.ID == current {
 		parts = append(parts, "current")
 	}
 	return fitModelRow(strings.Join(parts, "  "), width)
+}
+
+func sessionSearchText(sessionInfo events.SessionInfo) string {
+	if title := strings.TrimSpace(sessionInfo.Title); title != "" {
+		return title + " " + sessionInfo.ID
+	}
+	return sessionInfo.ID
+}
+
+func sessionRowLabel(sessionInfo events.SessionInfo) string {
+	if title := strings.TrimSpace(sessionInfo.Title); title != "" {
+		return title + " (" + sessionInfo.ID + ")"
+	}
+	return sessionInfo.ID
 }

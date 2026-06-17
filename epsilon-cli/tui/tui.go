@@ -58,7 +58,8 @@ func Start(ctx context.Context, config Config) error {
 		config.Harness.SlashCommands(), contextSummary, selectedModel,
 		config.Harness.ListModels, config.Harness.ListSessions, config.Harness.ResumeSession,
 		config.Harness.CurrentModel, config.Harness.CurrentEffort,
-		config.Harness.SetModel, config.Harness.SetEffort),
+		config.Harness.SetModel, config.Harness.SetEffort,
+		config.Harness.RenameSession),
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -95,6 +96,7 @@ type sessionListMsg struct {
 }
 type resumeSessionMsg struct {
 	sessionID string
+	title     string
 	session   *session.Session
 	sub       *events.Subscription
 	err       error
@@ -121,6 +123,7 @@ type model struct {
 	currentEffort func() string
 	setModel      func(context.Context, string) error
 	setEffort     func(string) error
+	renameSession func(context.Context, string, string) (bool, error)
 	modelPicker   *modelPicker
 	sessionPicker *sessionPicker
 	permission    *permissionPrompt
@@ -136,6 +139,7 @@ type model struct {
 	showContext   bool
 	density       densityMode
 	status        string
+	sessionTitle  string
 	styles        styles
 	broker        *PermissionBroker
 	streaming     int
@@ -146,8 +150,9 @@ type styles struct {
 	screen         lipgloss.Style
 	header         lipgloss.Style
 	title          lipgloss.Style
-	sessionID      lipgloss.Style
+	sessionName    lipgloss.Style
 	status         lipgloss.Style
+	statusReady    lipgloss.Style
 	help           lipgloss.Style
 	userLabel      lipgloss.Style
 	agentLabel     lipgloss.Style
@@ -214,7 +219,8 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	listSessions func(context.Context) ([]events.SessionInfo, error),
 	resumeSession func(context.Context, string) (*session.Session, error),
 	currentModel func() string, currentEffort func() string,
-	setModel func(context.Context, string) error, setEffort func(string) error) model {
+	setModel func(context.Context, string) error, setEffort func(string) error,
+	renameSession func(context.Context, string, string) (bool, error)) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
 	if slashRegistry == nil {
@@ -245,12 +251,17 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			Background(tuiBackground).
 			Bold(true).
 			Foreground(lipgloss.Color("250")),
-		sessionID: lipgloss.NewStyle().
+		sessionName: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("244")),
+			Foreground(lipgloss.Color("151")),
 		status: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("250")).
 			Background(lipgloss.Color("237")).
+			Padding(0, 1),
+		statusReady: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("255")).
+			Background(lipgloss.Color("35")).
 			Padding(0, 1),
 		help: lipgloss.NewStyle().
 			Background(tuiBackground).
@@ -343,8 +354,10 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		currentEffort: currentEffort,
 		setModel:      setModel,
 		setEffort:     setEffort,
+		renameSession: renameSession,
 		density:       densityComfortable,
 		status:        "ready",
+		sessionTitle:  "",
 		styles:        styles,
 		broker:        broker,
 		streaming:     -1,
@@ -534,9 +547,9 @@ func (m model) View() tea.View {
 		lipgloss.Center,
 		m.styles.title.Render("epsilon"),
 		" ",
-		m.styles.sessionID.Render(m.session.ID()),
+		m.styles.sessionName.Render(m.currentSessionLabel()),
 		" ",
-		m.styles.status.Render(m.status),
+		m.renderStatusBadge(),
 	)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	help := m.styles.help.Render("ctrl+o details:" + onOff(m.showEvents) +
@@ -575,6 +588,20 @@ func (m model) View() tea.View {
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	return view
+}
+
+func (m model) currentSessionLabel() string {
+	if title := strings.TrimSpace(m.sessionTitle); title != "" {
+		return title
+	}
+	return m.session.ID()
+}
+
+func (m model) renderStatusBadge() string {
+	if strings.TrimSpace(m.status) == "ready" {
+		return m.styles.statusReady.Render("Ready")
+	}
+	return m.styles.status.Render(m.status)
 }
 
 func (m *model) resize() {

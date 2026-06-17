@@ -163,13 +163,19 @@ func TestDefaultRegistryActions(t *testing.T) {
 		t.Fatalf("resume result = %#v, handled %v", result, handled)
 	}
 
-	result, handled, err = registry.Execute(context.Background(), "/rename session_123 hello world",
-		Execution{})
+	result, handled, err = registry.Execute(context.Background(), "/rename hello world",
+		Execution{SessionID: "session_123"})
 	if err != nil {
 		t.Fatalf("execute rename: %v", err)
 	}
 	if !handled || result.Action != ActionRenameSession || result.Session != "session_123" || result.Model != "hello world" {
 		t.Fatalf("rename result = %#v, handled %v", result, handled)
+	}
+
+	_, _, err = registry.Execute(context.Background(), "/rename hello",
+		Execution{})
+	if err == nil {
+		t.Fatalf("rename without current session should fail")
 	}
 
 	result, handled, err = registry.Execute(context.Background(), "/exit", Execution{})

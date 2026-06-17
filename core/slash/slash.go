@@ -214,28 +214,21 @@ func NewDefaultRegistry() *Registry {
 	registry.Register(Command{
 		Name:        "rename",
 		Aliases:     []string{"title"},
-		Usage:       "/rename <session-id> <title...>",
-		Description: "rename a persisted session",
+		Usage:       "/rename <title...>",
+		Description: "rename the current session",
 		Handler: func(_ context.Context, exec Execution) (Result, error) {
-			args := strings.TrimSpace(exec.Args)
-			if args == "" {
-				return Result{}, fmt.Errorf("usage: /rename <session-id> <title...>")
+			title := strings.TrimSpace(exec.Args)
+			if strings.TrimSpace(exec.SessionID) == "" {
+				return Result{}, fmt.Errorf("cannot rename session without a current session")
 			}
-
-			sessionID, title, ok := strings.Cut(args, " ")
-			if !ok {
-				return Result{}, fmt.Errorf("usage: /rename <session-id> <title...>")
-			}
-			sessionID = strings.TrimSpace(sessionID)
-			title = strings.TrimSpace(title)
-			if sessionID == "" || title == "" {
-				return Result{}, fmt.Errorf("usage: /rename <session-id> <title...>")
+			if title == "" {
+				return Result{}, fmt.Errorf("usage: /rename <title...>")
 			}
 
 			return Result{
 				Action:  ActionRenameSession,
-				Session: sessionID,
-				Message: "renaming " + sessionID,
+				Session: exec.SessionID,
+				Message: "renaming current session",
 				Model:   title, // reuse existing field for the title payload
 			}, nil
 		},

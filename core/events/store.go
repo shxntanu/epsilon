@@ -10,6 +10,7 @@ import (
 // SessionInfo summarizes one persisted session.
 type SessionInfo struct {
 	ID        string
+	Title     string
 	UpdatedAt time.Time
 }
 
@@ -22,4 +23,10 @@ type Store interface {
 // SessionLister lists persisted sessions when a store supports discovery.
 type SessionLister interface {
 	ListSessions(ctx context.Context) ([]SessionInfo, error)
+}
+
+// SessionRenamer updates persisted per-session metadata.
+// Implementations should return (false,nil) when the session does not exist.
+type SessionRenamer interface {
+	RenameSession(ctx context.Context, sessionID string, title string) (bool, error)
 }

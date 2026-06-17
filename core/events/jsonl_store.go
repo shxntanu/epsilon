@@ -15,6 +15,11 @@ import (
 )
 
 const eventsFileName = "events.jsonl"
+const metadataFileName = "metadata.json"
+
+type sessionMetadata struct {
+	Title string `json:"title,omitempty"`
+}
 
 // JSONLStore stores each session's events as newline-delimited JSON.
 type JSONLStore struct {
@@ -159,8 +164,14 @@ func (s *JSONLStore) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 			continue
 		}
 
+		metadata, err := s.readSessionMetadata(sessionID)
+		if err != nil {
+			return nil, err
+		}
+
 		sessions = append(sessions, SessionInfo{
 			ID:        sessionID,
+			Title:     metadata.Title,
 			UpdatedAt: info.ModTime(),
 		})
 	}
@@ -172,6 +183,27 @@ func (s *JSONLStore) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 		return sessions[i].ID < sessions[j].ID
 	})
 	return sessions, nil
+}
+
+func (s *JSONLStore) readSessionMetadata(sessionID string) (sessionMetadata, error) {
+	metaPath, err := s.metadataPath(sessionID)
+	if err != nil {
+		return sessionMetadata{}, err
+	}
+
+	data, err := os.ReadFile(metaPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return sessionMetadata{}, nil
+	}
+	if err != nil {
+		return sessionMetadata{}, fmt.Errorf("read session metadata: %w", err)
+	}
+
+	var metadata sessionMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return sessionMetadata{}, fmt.Errorf("decode session metadata: %w", err)
+	}
+	return metadata, nil
 }
 
 func (s *JSONLStore) hasConversationEvents(ctx context.Context, sessionID string) (bool, error) {
@@ -200,6 +232,73 @@ func (s *JSONLStore) eventsPath(sessionID string) (string, error) {
 	}
 
 	return filepath.Join(s.baseDir, sessionID, eventsFileName), nil
+}
+
+func (s *JSONLStore) metadataPath(sessionID string) (string, error) {
+	if err := validateSessionID(sessionID); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.baseDir, sessionID, metadataFileName), nil
+}
+
+// RenameSession persists a session title in per-session metadata.
+func (s *JSONLStore) RenameSession(ctx context.Context, sessionID string, title string) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, fmt.Errorf("rename session cancelled: %w", ctx.Err())
+	default:
+	}
+
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return false, fmt.Errorf("title cannot be empty")
+	}
+
+	metaPath, err := s.metadataPath(sessionID)
+	if err != nil {
+		return false, err
+	}
+
+	// Only allow renaming if the session has persisted event logs.
+	eventPath, err := s.eventsPath(sessionID)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(eventPath); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("stat session events: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(metaPath), 0o700); err != nil {
+		return false, fmt.Errorf("create session metadata dir: %w", err)
+	}
+
+	data, err := json.MarshalIndent(sessionMetadata{Title: title}, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("encode session metadata: %w", err)
+	}
+	data = append(data, '\n')
+
+	tmp, err := os.CreateTemp(filepath.Dir(metaPath), ".metadata-*.tmp")
+	if err != nil {
+		return false, fmt.Errorf("create metadata temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return false, fmt.Errorf("write metadata temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return false, fmt.Errorf("close metadata temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, metaPath); err != nil {
+		return false, fmt.Errorf("replace metadata file: %w", err)
+	}
+
+	return true, nil
 }
 
 func validateSessionID(sessionID string) error {

@@ -54,3 +54,38 @@ func TestJSONLStoreListSessions(t *testing.T) {
 		t.Fatalf("sessions = %#v, want session_a and session_b", sessions)
 	}
 }
+
+func TestJSONLStoreListSessionsIncludesTitle(t *testing.T) {
+	store, err := NewJSONLStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	if err := store.Append(context.Background(), types.Event{
+		SessionID: "session_a",
+		Kind:      types.EventUserMessageAdded,
+		CreatedAt: time.Now().UTC(),
+		Message:   &types.Message{Role: types.RoleUser, Content: []types.ContentPart{types.TextPart("hello")}},
+	}); err != nil {
+		t.Fatalf("append session a: %v", err)
+	}
+
+	ok, err := store.RenameSession(context.Background(), "session_a", "Planning work")
+	if err != nil {
+		t.Fatalf("rename session: %v", err)
+	}
+	if !ok {
+		t.Fatalf("rename session returned false")
+	}
+
+	sessions, err := store.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(sessions))
+	}
+	if sessions[0].Title != "Planning work" {
+		t.Fatalf("title = %q, want %q", sessions[0].Title, "Planning work")
+	}
+}

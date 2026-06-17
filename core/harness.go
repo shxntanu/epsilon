@@ -183,6 +183,22 @@ func (h *Harness) SlashCommands() *slash.Registry {
 	return h.slashRegistry
 }
 
+func (h *Harness) RenameSession(ctx context.Context, sessionID string, title string) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return false, fmt.Errorf("session ID cannot be empty")
+	}
+	if h.eventStore == nil {
+		return false, ErrEventStoreMissing
+	}
+
+	renamer, ok := h.eventStore.(events.SessionRenamer)
+	if !ok {
+		return false, fmt.Errorf("event store does not support session renaming")
+	}
+
+	return renamer.RenameSession(ctx, sessionID, title)
+}
+
 func (h *Harness) ContextSummary(sessionID string) (contextwindow.Summary, bool) {
 	sess, ok := h.GetSession(sessionID)
 	if !ok {

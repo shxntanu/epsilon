@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/slash"
 )
 
@@ -80,11 +81,34 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		m.status = "effort:" + statusEffort
 		m.appendSlashMessage(result.Message)
 	case slash.ActionResumeChat:
-		return m.resumeChat(result.Session)
+		return m.resumeChat(events.SessionInfo{ID: result.Session})
 	case slash.ActionRenameSession:
-		// TODO: wire to a harness capability once supported.
-		m.appendPlain(m.styles.error.Render("rename is not implemented"))
+		if m.renameSession == nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render("rename is not available"))
+			return nil
+		}
+		title := strings.TrimSpace(result.Model)
+		sessionID := strings.TrimSpace(result.Session)
+		if title == "" || sessionID == "" {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render("usage: /rename <title...>"))
+			return nil
+		}
+		ok, err := m.renameSession(m.ctx, sessionID, title)
 		m.status = "ready"
+		if err != nil {
+			m.appendPlain(m.styles.error.Render(err.Error()))
+			return nil
+		}
+		if !ok {
+			m.appendPlain(m.styles.error.Render("session not found"))
+			return nil
+		}
+		if sessionID == m.session.ID() {
+			m.sessionTitle = title
+		}
+		m.appendPlain(m.styles.muted.Render("renamed current session: " + title))
 	case slash.ActionQuit:
 		return quitCmd()
 	default:
