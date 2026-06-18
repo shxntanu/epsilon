@@ -51,7 +51,7 @@ func (w contextWidget) View() string {
 	line := label + " | " + details + " | " + until
 
 	style := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("250")).
+		Foreground(tuiInkStrong).
 		Background(contextColor(w.summary)).
 		Padding(0, 1).
 		Width(max(0, w.width-2))
@@ -62,12 +62,12 @@ func (w contextWidget) Panel() string {
 	width := max(contextPanelMinWidth, w.width)
 	innerWidth := max(20, width-4)
 	headingStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("234")).
+		Background(tuiSurface).
 		Bold(true).
-		Foreground(lipgloss.Color("250"))
+		Foreground(tuiInkStrong)
 	subheadingStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("234")).
-		Foreground(lipgloss.Color("146")).
+		Background(tuiSurface).
+		Foreground(tuiAccentAgent).
 		Bold(true)
 	lines := []string{
 		headingStyle.Render("Context"),
@@ -106,9 +106,9 @@ func (w contextWidget) Panel() string {
 		Width(max(1, width-3)).
 		Height(w.height).
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(lipgloss.Color("238")).
-		Background(lipgloss.Color("234")).
-		Foreground(lipgloss.Color("252")).
+		BorderForeground(tuiLine).
+		Background(tuiSurface).
+		Foreground(tuiInk).
 		Padding(0, 1).
 		Render(body)
 }
@@ -167,18 +167,18 @@ func recentSegments(segments []contextwindow.Segment, count int) []contextwindow
 func contextBar(percent float64, width int) string {
 	width = max(8, width)
 	fill := min(int(percent*float64(width)), width)
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("146")).Render(strings.Repeat("=", fill)) +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(strings.Repeat("-", width-fill))
+	return lipgloss.NewStyle().Foreground(tuiAccentAgent).Render(strings.Repeat("=", fill)) +
+		lipgloss.NewStyle().Foreground(tuiFaint).Render(strings.Repeat("-", width-fill))
 }
 
 func contextColor(summary contextwindow.Summary) color.Color {
 	switch {
 	case summary.NeedsCompaction:
-		return lipgloss.Color("52")
+		return tuiStatusDanger
 	case summary.PercentUsed >= summary.CompactionThreshold*0.8:
-		return lipgloss.Color("58")
+		return tuiStatusWarn
 	default:
-		return lipgloss.Color("235")
+		return tuiSurface2
 	}
 }
 

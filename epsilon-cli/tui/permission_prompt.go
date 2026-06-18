@@ -34,25 +34,26 @@ func newPermissionPrompt(request types.PermissionRequest) permissionPrompt {
 			box: lipgloss.NewStyle().
 				Background(tuiBackground).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("242")).
+				BorderForeground(tuiAccentWarn).
 				Padding(0, 1),
 			title: lipgloss.NewStyle().
 				Background(tuiBackground).
 				Bold(true).
-				Foreground(lipgloss.Color("250")),
+				Foreground(tuiInkStrong),
 			body: lipgloss.NewStyle().
 				Background(tuiBackground).
-				Foreground(lipgloss.Color("248")),
+				Foreground(tuiInk),
 			muted: lipgloss.NewStyle().
 				Background(tuiBackground).
-				Foreground(lipgloss.Color("242")),
+				Foreground(tuiSubtle),
 			selected: lipgloss.NewStyle().
-				Foreground(lipgloss.Color("255")).
-				Background(lipgloss.Color("239")).
+				Foreground(tuiInkStrong).
+				Background(tuiSelected).
+				Bold(true).
 				Padding(0, 1),
 			option: lipgloss.NewStyle().
 				Background(tuiBackground).
-				Foreground(lipgloss.Color("245")).
+				Foreground(tuiMuted).
 				Padding(0, 1),
 		},
 	}
@@ -99,7 +100,7 @@ func (p permissionPrompt) View() string {
 	for i, option := range options {
 		rendered[i] = p.styles.option.Render(option)
 		if p.choice == i {
-			rendered[i] = p.styles.selected.Render(option)
+			rendered[i] = p.selectedStyle(i).Render(option)
 		}
 	}
 
@@ -121,6 +122,20 @@ func (p permissionPrompt) View() string {
 	)
 
 	return p.styles.box.Width(max(20, p.width-4)).Render(content)
+}
+
+func (p permissionPrompt) selectedStyle(choice int) lipgloss.Style {
+	style := p.styles.selected
+	switch choice {
+	case 0:
+		return style.Background(tuiStatusReady)
+	case 1:
+		return style.Background(tuiStatusWorking)
+	case 2:
+		return style.Background(tuiStatusDanger)
+	default:
+		return style
+	}
 }
 
 func compactJSON(value string) string {

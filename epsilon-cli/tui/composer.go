@@ -33,28 +33,28 @@ func newComposer() composer {
 	styles.Focused.Base = styles.Focused.Base.Background(tuiBackground)
 	styles.Focused.Text = lipgloss.NewStyle().
 		Background(tuiBackground).
-		Foreground(lipgloss.Color("252"))
-	styles.Focused.CursorLine = lipgloss.NewStyle().Background(lipgloss.Color("235"))
+		Foreground(tuiInk)
+	styles.Focused.CursorLine = lipgloss.NewStyle().Background(tuiSurface2)
 	styles.Focused.Placeholder = lipgloss.NewStyle().
 		Background(tuiBackground).
-		Foreground(lipgloss.Color("244")).
+		Foreground(tuiSubtle).
 		Italic(true)
 	styles.Focused.EndOfBuffer = lipgloss.NewStyle().
 		Background(tuiBackground).
-		Foreground(lipgloss.Color("235"))
+		Foreground(tuiSurface2)
 	styles.Blurred.Base = styles.Blurred.Base.Background(tuiBackground)
 	styles.Blurred.Text = lipgloss.NewStyle().
 		Background(tuiBackground).
-		Foreground(lipgloss.Color("252"))
+		Foreground(tuiInk)
 	styles.Blurred.CursorLine = lipgloss.NewStyle().Background(tuiBackground)
 	styles.Blurred.Placeholder = lipgloss.NewStyle().
 		Background(tuiBackground).
-		Foreground(lipgloss.Color("244")).
+		Foreground(tuiSubtle).
 		Italic(true)
 	styles.Blurred.EndOfBuffer = lipgloss.NewStyle().
 		Background(tuiBackground).
-		Foreground(lipgloss.Color("235"))
-	styles.Cursor.Color = lipgloss.Color("146")
+		Foreground(tuiSurface2)
+	styles.Cursor.Color = tuiAccentAgent
 	input.SetStyles(styles)
 
 	return composer{
@@ -62,8 +62,8 @@ func newComposer() composer {
 		style: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("241")).
-			Foreground(lipgloss.Color("252")).
+			BorderForeground(tuiLineStrong).
+			Foreground(tuiInk).
 			Padding(0, 1),
 	}
 }

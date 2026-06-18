@@ -285,17 +285,17 @@ func (m model) clampedSlashCursor(length int) int {
 func selectorStyles(base styles) styles {
 	base.selector = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("238")).
-		Background(lipgloss.Color("234")).
-		Foreground(lipgloss.Color("252")).
+		BorderForeground(tuiLine).
+		Background(tuiSurface).
+		Foreground(tuiInk).
 		Padding(0, 1)
 	base.selectorActive = lipgloss.NewStyle().
-		Background(lipgloss.Color("238")).
-		Foreground(lipgloss.Color("252")).
+		Background(tuiSelected).
+		Foreground(tuiInkStrong).
 		Bold(true)
 	base.selectorTitle = lipgloss.NewStyle().
-		Background(lipgloss.Color("234")).
-		Foreground(lipgloss.Color("146")).
+		Background(tuiSurface).
+		Foreground(tuiAccentAgent).
 		Bold(true)
 	return base
 }

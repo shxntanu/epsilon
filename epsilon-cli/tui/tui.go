@@ -256,90 +256,90 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	styles := styles{
 		screen: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("252")),
+			Foreground(tuiInk),
 		header: lipgloss.NewStyle().
 			Background(tuiBackground).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderBottom(true).
-			BorderForeground(lipgloss.Color("238")).
+			BorderForeground(tuiLine).
 			Padding(0, 1),
 		title: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Bold(true).
-			Foreground(lipgloss.Color("250")),
+			Foreground(tuiInkStrong),
 		sessionName: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("151")),
+			Foreground(tuiAccentAgent),
 		status: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("250")).
-			Background(lipgloss.Color("237")).
+			Foreground(tuiInk).
+			Background(tuiSurface3).
 			Padding(0, 1),
 		statusReady: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("255")).
-			Background(lipgloss.Color("35")).
+			Foreground(tuiInkStrong).
+			Background(tuiStatusReady).
 			Padding(0, 1),
 		help: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("240")).
+			Foreground(tuiFaint).
 			Padding(0, 1),
 		userLabel: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("109")).
+			Foreground(tuiAccentUser).
 			Bold(true),
 		agentLabel: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("146")).
+			Foreground(tuiAccentAgent).
 			Bold(true),
 		userBlock: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			Background(tuiBackground).
+			Foreground(tuiInk).
+			Background(tuiSurface2).
 			Padding(0, 1),
 		eventBlock: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("246")).
-			Background(lipgloss.Color("235")).
+			Foreground(tuiMuted).
+			Background(tuiSurface2).
 			Padding(0, 1),
 		statusLine: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("244")),
+			Foreground(tuiSubtle),
 		toolBlock: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("235")).
+			Foreground(tuiInk).
+			Background(tuiSurface2).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderLeft(true).
-			BorderForeground(lipgloss.Color("178")).
+			BorderForeground(tuiAccentTool).
 			Padding(0, 1),
 		diffBlock: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("234")).
+			Foreground(tuiInk).
+			Background(tuiSurface).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderLeft(true).
-			BorderForeground(lipgloss.Color("244")).
+			BorderForeground(tuiSubtle).
 			Padding(0, 1),
 		diffHeader: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("183")).
+			Foreground(tuiAccentModel).
 			Bold(true),
 		diffAdd: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("120")),
+			Foreground(tuiAccentOK),
 		diffRemove: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("210")),
+			Foreground(tuiAccentDanger),
 		diffMeta: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("246")),
+			Foreground(tuiMuted),
 		tool: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("178")).
+			Foreground(tuiAccentTool).
 			Bold(true),
 		error: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("203")).
+			Foreground(tuiAccentDanger).
 			Bold(true),
 		muted: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("244")),
+			Foreground(tuiSubtle),
 	}
 	styles = selectorStyles(styles)
 	spin := spinner.New(
@@ -630,10 +630,11 @@ func (m model) currentSessionLabel() string {
 }
 
 func (m model) renderStatusBadge() string {
-	if strings.TrimSpace(m.status) == "ready" {
-		return m.styles.statusReady.Render("Ready")
+	status := strings.TrimSpace(m.status)
+	if status == "" || status == "ready" {
+		return statusBadgeStyle("ready").Render("Ready")
 	}
-	return m.styles.status.Render(m.status)
+	return statusBadgeStyle(status).Render(status)
 }
 
 func (m model) currentMouseMode() tea.MouseMode {
@@ -1257,6 +1258,9 @@ func (m model) renderToolEntry(entry transcriptEntry) string {
 	}
 
 	lines := []string{title}
+	if !m.showEvents && !m.densityCompact() {
+		lines = append(lines, m.styles.muted.Render("ctrl+o shows tool input and output"))
+	}
 	if m.showEvents {
 		if detail := renderToolDetails(entry, m.styles.muted, m.styles.error); detail != "" {
 			lines = append(lines, detail)
@@ -1282,6 +1286,9 @@ func (m model) renderToolGroupEntry(entry transcriptEntry) string {
 	}
 
 	lines := []string{title}
+	if !m.showEvents && len(entry.tools) > 0 && !m.densityCompact() {
+		lines = append(lines, m.styles.muted.Render("ctrl+o expands grouped tool details"))
+	}
 	if m.showEvents {
 		for _, tool := range entry.tools {
 			nested := "  " + tool.text
@@ -1363,6 +1370,10 @@ func (m model) entrySeparator() string {
 	}
 
 	return "\n\n"
+}
+
+func (m model) densityCompact() bool {
+	return m.density == densityCompact
 }
 
 func quitCmd() tea.Cmd {

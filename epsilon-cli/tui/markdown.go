@@ -26,47 +26,47 @@ func newMarkdownRenderer(width int) markdownRenderer {
 		width: max(20, width),
 		text: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("252")),
+			Foreground(tuiInk),
 		heading: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Bold(true).
-			Foreground(lipgloss.Color("183")),
+			Foreground(tuiAccentModel),
 		emphasis: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Italic(true).
-			Foreground(lipgloss.Color("252")),
+			Foreground(tuiInk),
 		strong: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Bold(true).
-			Foreground(lipgloss.Color("255")),
+			Foreground(tuiInkStrong),
 		inlineCode: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("230")).
-			Background(lipgloss.Color("238")),
+			Foreground(tuiInkStrong).
+			Background(tuiSelected),
 		codeBlock: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("235")).
+			Foreground(tuiInk).
+			Background(tuiSurface2).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderLeft(true).
-			BorderForeground(lipgloss.Color("103")).
+			BorderForeground(tuiAccentInfo).
 			Padding(0, 1),
 		codeLabel: lipgloss.NewStyle().
-			Background(lipgloss.Color("235")).
-			Foreground(lipgloss.Color("146")).
+			Background(tuiSurface2).
+			Foreground(tuiAccentAgent).
 			Bold(true),
 		quote: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("246")).
+			Foreground(tuiMuted).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderLeft(true).
-			BorderForeground(lipgloss.Color("244")).
+			BorderForeground(tuiSubtle).
 			PaddingLeft(1),
 		bullet: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("146")).
+			Foreground(tuiAccentAgent).
 			Bold(true),
 		rule: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(lipgloss.Color("238")),
+			Foreground(tuiLine),
 	}
 }
 
