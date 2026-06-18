@@ -979,7 +979,24 @@ func (m *model) appendExplorationTool(entry transcriptEntry) bool {
 		m.refreshToolGroup(index)
 		return true
 	}
+	if groupIndex := m.findCurrentExplorationGroup(); groupIndex >= 0 {
+		m.entries[groupIndex].tools = append(m.entries[groupIndex].tools, entry)
+		m.refreshToolGroup(groupIndex)
+		return true
+	}
 	return false
+}
+
+func (m model) findCurrentExplorationGroup() int {
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		switch m.entries[i].kind {
+		case transcriptToolGroup:
+			return i
+		case transcriptUser:
+			return -1
+		}
+	}
+	return -1
 }
 
 func (m *model) refreshToolGroup(index int) {
@@ -1255,8 +1272,10 @@ func (m model) renderToolEntry(entry transcriptEntry) string {
 	}
 	if entry.toolError {
 		title = m.styles.error.Render(title)
-	} else {
+	} else if isExplorationTool(entry.toolName) {
 		title = m.styles.tool.Render(title)
+	} else {
+		title = m.styles.muted.Render(title)
 	}
 
 	lines := []string{title}
@@ -1271,7 +1290,10 @@ func (m model) renderToolEntry(entry transcriptEntry) string {
 }
 
 func (m model) renderToolGroupEntry(entry transcriptEntry) string {
-	title := renderToolTitle(entry)
+	title := renderExplorationTitle(entry)
+	if m.showEvents {
+		title = entry.text
+	}
 	if entry.toolActive {
 		title = m.spinner.View() + " " + title
 	}
@@ -1284,7 +1306,7 @@ func (m model) renderToolGroupEntry(entry transcriptEntry) string {
 	lines := []string{title}
 	if m.showEvents {
 		for _, tool := range entry.tools {
-			nested := "  " + renderToolTitle(tool)
+			nested := "  " + renderExplorationToolTitle(tool)
 			if tool.toolError {
 				nested = m.styles.error.Render(nested)
 			} else {
@@ -1425,118 +1447,8 @@ func renderToolTitle(entry transcriptEntry) string {
 	if entry.toolActive {
 		return "using " + name
 	}
+	if name == "bash" {
+		return renderBashToolTitle(entry)
+	}
 	return name
-}
-
-func indentLines(text string, prefix string) string {
-	if text == "" {
-		return ""
-	}
-	lines := strings.Split(text, "\n")
-	for i := range lines {
-		lines[i] = prefix + lines[i]
-	}
-	return strings.Join(lines, "\n")
-}
-
-func isExplorationTool(name string) bool {
-	switch name {
-	case "read_file", "list_dir", "file_tree", "grep", "ripgrep", "git_status", "git_diff":
-		return true
-	default:
-		return false
-	}
-}
-
-func toolGroupText(tools []transcriptEntry, active bool, failed int) string {
-	count := len(tools)
-	if count == 0 {
-		return "Exploring workspace"
-	}
-	action := "Explored"
-	if active {
-		action = "Exploring"
-	}
-	if failed > 0 {
-		action = "Explored with errors"
-	}
-	return fmt.Sprintf("%s %d %s: %s", action, count, pluralize(count, "item", "items"),
-		compactToolNames(tools))
-}
-
-func compactToolNames(tools []transcriptEntry) string {
-	const maxNames = 4
-	names := make([]string, 0, min(len(tools), maxNames))
-	for i, tool := range tools {
-		if i >= maxNames {
-			break
-		}
-		names = append(names, tool.toolName)
-	}
-	if len(tools) > maxNames {
-		names = append(names, fmt.Sprintf("+%d more", len(tools)-maxNames))
-	}
-	return strings.Join(names, ", ")
-}
-
-func pluralize(count int, singular string, plural string) string {
-	if count == 1 {
-		return singular
-	}
-	return plural
-}
-
-func defaultSessionTitle(prompt string, maxRunes int) string {
-	title := strings.Join(strings.Fields(prompt), " ")
-	if maxRunes <= 0 {
-		return title
-	}
-
-	runes := []rune(title)
-	if len(runes) <= maxRunes {
-		return title
-	}
-	return strings.TrimSpace(string(runes[:maxRunes]))
-}
-
-func toolRequestedText(name string) string {
-	return "Preparing to use " + name
-}
-
-func toolRunningText(name string) string {
-	return "Using " + name
-}
-
-func toolCompletedText(name string) string {
-	return "Used " + name
-}
-
-func textFromContent(content []types.ContentPart) string {
-	var b strings.Builder
-	for _, part := range content {
-		if part.Kind != types.ContentText {
-			continue
-		}
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(part.Text)
-	}
-
-	return b.String()
-}
-
-func max(a int, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func onOff(value bool) string {
-	if value {
-		return "on"
-	}
-
-	return "off"
 }

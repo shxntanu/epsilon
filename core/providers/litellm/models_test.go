@@ -251,6 +251,81 @@ func TestStreamRespondMergesRepeatedToolCallSnapshots(t *testing.T) {
 	}
 }
 
+func TestStreamRespondMergesRepeatedToolCallSnapshotsWithoutIndex(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list_dir\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}]}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list_dir\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}]}}]}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewBufferString(body)),
+		}, nil
+	})}
+
+	provider, err := New(Config{
+		BaseURL:    "http://litellm.test",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	resp, err := provider.StreamRespond(context.Background(), types.ModelRequest{
+		Messages: []types.Message{types.UserMessage("hello")},
+	}, nil)
+	if err != nil {
+		t.Fatalf("stream respond: %v", err)
+	}
+	if len(resp.Message.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(resp.Message.ToolCalls))
+	}
+	call := resp.Message.ToolCalls[0]
+	if call.Name != "list_dir" {
+		t.Fatalf("tool name = %q, want list_dir", call.Name)
+	}
+}
+
+func TestStreamRespondSeparatesMultipleToolCallsWithoutIndex(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[" +
+			"{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list_dir\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}," +
+			"{\"id\":\"call_2\",\"type\":\"function\",\"function\":{\"name\":\"git_status\",\"arguments\":\"{}\"}}," +
+			"{\"id\":\"call_3\",\"type\":\"function\",\"function\":{\"name\":\"ripgrep\",\"arguments\":\"{\\\"pattern\\\":\\\"TODO\\\"}\"}}" +
+			"]}}]}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewBufferString(body)),
+		}, nil
+	})}
+
+	provider, err := New(Config{
+		BaseURL:    "http://litellm.test",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	resp, err := provider.StreamRespond(context.Background(), types.ModelRequest{
+		Messages: []types.Message{types.UserMessage("hello")},
+	}, nil)
+	if err != nil {
+		t.Fatalf("stream respond: %v", err)
+	}
+	if len(resp.Message.ToolCalls) != 3 {
+		t.Fatalf("tool calls = %#v, want 3 separate calls", resp.Message.ToolCalls)
+	}
+	for i, want := range []string{"list_dir", "git_status", "ripgrep"} {
+		if resp.Message.ToolCalls[i].Name != want {
+			t.Fatalf("tool call %d name = %q, want %q", i,
+				resp.Message.ToolCalls[i].Name, want)
+		}
+	}
+}
+
 func TestStreamRespondMergesFragmentedToolCallArguments(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		body := "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list\",\"arguments\":\"{\\\"path\\\"\"}}]}}]}\n\n" +

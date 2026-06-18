@@ -165,7 +165,7 @@ type chatFunction struct {
 
 type chatToolCall struct {
 	ID       string           `json:"id"`
-	Index    int              `json:"index,omitempty"`
+	Index    *int             `json:"index,omitempty"`
 	Type     string           `json:"type,omitempty"`
 	Function chatCallFunction `json:"function"`
 }
@@ -329,11 +329,15 @@ func readStreamResponse(ctx context.Context, body io.Reader,
 
 func mergeStreamToolCalls(existing []chatToolCall, deltas []chatToolCall) []chatToolCall {
 	for _, delta := range deltas {
-		for len(existing) <= delta.Index {
-			existing = append(existing, chatToolCall{Index: len(existing)})
+		index := streamToolCallIndex(existing, delta)
+		for len(existing) <= index {
+			existing = append(existing, chatToolCall{Index: intPtr(len(existing))})
 		}
 
-		call := &existing[delta.Index]
+		call := &existing[index]
+		if call.Index == nil {
+			call.Index = intPtr(index)
+		}
 		if delta.ID != "" {
 			call.ID = delta.ID
 		}
@@ -352,6 +356,70 @@ func mergeStreamToolCalls(existing []chatToolCall, deltas []chatToolCall) []chat
 	return existing
 }
 
+func streamToolCallIndex(existing []chatToolCall, delta chatToolCall) int {
+	if delta.ID != "" {
+		for i, call := range existing {
+			if call.ID == delta.ID {
+				return i
+			}
+		}
+	}
+
+	if delta.Index != nil {
+		index := *delta.Index
+		if index >= 0 && index < len(existing) && !canMergeStreamToolCall(existing[index], delta) {
+			return len(existing)
+		}
+		if index >= 0 {
+			return index
+		}
+	}
+
+	if len(existing) == 0 {
+		return 0
+	}
+
+	last := len(existing) - 1
+	if canMergeStreamToolCall(existing[last], delta) {
+		return last
+	}
+	return len(existing)
+}
+
+func canMergeStreamToolCall(existing chatToolCall, delta chatToolCall) bool {
+	if existing.ID != "" && delta.ID != "" && existing.ID != delta.ID {
+		return false
+	}
+	if !canMergeStreamField(existing.Function.Name, delta.Function.Name) {
+		return false
+	}
+	return canMergeStreamArguments(existing.Function.Arguments, delta.Function.Arguments)
+}
+
+func canMergeStreamField(existing string, delta string) bool {
+	if existing == "" || delta == "" {
+		return true
+	}
+	if strings.HasPrefix(existing, delta) || strings.HasPrefix(delta, existing) {
+		return true
+	}
+	return !json.Valid([]byte(existing)) && strings.HasPrefix(delta, "_")
+}
+
+func canMergeStreamArguments(existing string, delta string) bool {
+	if existing == "" || delta == "" {
+		return true
+	}
+	if strings.HasPrefix(existing, delta) || strings.HasPrefix(delta, existing) {
+		return true
+	}
+	if json.Valid([]byte(existing)) {
+		return false
+	}
+	trimmedDelta := strings.TrimSpace(delta)
+	return !strings.HasPrefix(trimmedDelta, "{") && !strings.HasPrefix(trimmedDelta, "[")
+}
+
 func mergeStreamField(existing string, delta string) string {
 	if existing == "" {
 		return delta
@@ -363,6 +431,10 @@ func mergeStreamField(existing string, delta string) string {
 		return delta
 	}
 	return existing + delta
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func convertMessages(messages []types.Message) []chatMessage {
@@ -440,6 +512,9 @@ func convertResponseToolCalls(calls []chatToolCall) []types.ToolCall {
 
 	converted := make([]types.ToolCall, 0, len(calls))
 	for _, call := range calls {
+		if strings.TrimSpace(call.Function.Name) == "" {
+			continue
+		}
 		input := json.RawMessage(strings.TrimSpace(call.Function.Arguments))
 		if len(input) == 0 {
 			input = json.RawMessage(`{}`)
