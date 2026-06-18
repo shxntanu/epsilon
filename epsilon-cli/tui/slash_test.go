@@ -126,10 +126,16 @@ func TestRenderToolEntryHidesDetailsUntilExpanded(t *testing.T) {
 	if strings.Contains(collapsed, "project docs") || strings.Contains(collapsed, `"path"`) {
 		t.Fatalf("collapsed tool entry leaked details:\n%s", collapsed)
 	}
+	if strings.Contains(collapsed, "ctrl+o") {
+		t.Fatalf("collapsed tool entry should not render persistent hint:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "Used read_file") || !strings.Contains(collapsed, "read_file") {
+		t.Fatalf("collapsed tool entry = %q, want compact tool name", collapsed)
+	}
 
 	m.showEvents = true
 	expanded := m.renderToolEntry(entry)
-	for _, want := range []string{"Used read_file", `{"path":"README.md"}`, "project docs"} {
+	for _, want := range []string{"read_file", `{"path":"README.md"}`, "project docs"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded tool entry missing %q:\n%s", want, expanded)
 		}
@@ -172,10 +178,13 @@ func TestRenderToolGroupHidesNestedDetailsUntilExpanded(t *testing.T) {
 	if strings.Contains(collapsed, "project docs") || strings.Contains(collapsed, "No matches found") {
 		t.Fatalf("collapsed tool group leaked details:\n%s", collapsed)
 	}
+	if strings.Contains(collapsed, "ctrl+o") {
+		t.Fatalf("collapsed tool group should not render persistent hint:\n%s", collapsed)
+	}
 
 	m.showEvents = true
 	expanded := m.renderToolGroupEntry(entry)
-	for _, want := range []string{"Explored 2 items", "Used read_file", `{"path":"README.md"}`, "No matches found."} {
+	for _, want := range []string{"Explored 2 items", "read_file", `{"path":"README.md"}`, "No matches found."} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded tool group missing %q:\n%s", want, expanded)
 		}

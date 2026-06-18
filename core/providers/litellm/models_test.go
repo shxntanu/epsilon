@@ -213,6 +213,79 @@ func TestStreamRespondRequestsAndParsesUsage(t *testing.T) {
 	}
 }
 
+func TestStreamRespondMergesRepeatedToolCallSnapshots(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list_dir\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}]}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list_dir\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}]}}]}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewBufferString(body)),
+		}, nil
+	})}
+
+	provider, err := New(Config{
+		BaseURL:    "http://litellm.test",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	resp, err := provider.StreamRespond(context.Background(), types.ModelRequest{
+		Messages: []types.Message{types.UserMessage("hello")},
+	}, nil)
+	if err != nil {
+		t.Fatalf("stream respond: %v", err)
+	}
+	if len(resp.Message.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(resp.Message.ToolCalls))
+	}
+	call := resp.Message.ToolCalls[0]
+	if call.Name != "list_dir" {
+		t.Fatalf("tool name = %q, want list_dir", call.Name)
+	}
+	if string(call.Input) != `{"path":"."}` {
+		t.Fatalf("tool input = %s, want path object", call.Input)
+	}
+}
+
+func TestStreamRespondMergesFragmentedToolCallArguments(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"list\",\"arguments\":\"{\\\"path\\\"\"}}]}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"_dir\",\"arguments\":\":\\\".\\\"}\"}}]}}]}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewBufferString(body)),
+		}, nil
+	})}
+
+	provider, err := New(Config{
+		BaseURL:    "http://litellm.test",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	resp, err := provider.StreamRespond(context.Background(), types.ModelRequest{
+		Messages: []types.Message{types.UserMessage("hello")},
+	}, nil)
+	if err != nil {
+		t.Fatalf("stream respond: %v", err)
+	}
+	call := resp.Message.ToolCalls[0]
+	if call.Name != "list_dir" {
+		t.Fatalf("tool name = %q, want list_dir", call.Name)
+	}
+	if string(call.Input) != `{"path":"."}` {
+		t.Fatalf("tool input = %s, want path object", call.Input)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

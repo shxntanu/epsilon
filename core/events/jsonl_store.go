@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/shxntanu/epsilon/core/types"
 )
@@ -150,29 +151,41 @@ func (s *JSONLStore) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 			continue
 		}
 
-		path := filepath.Join(s.baseDir, sessionID, eventsFileName)
-		info, err := os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("stat session events: %w", err)
-		}
-		if ok, err := s.hasConversationEvents(ctx, sessionID); err != nil {
-			return nil, err
-		} else if !ok {
-			continue
-		}
-
 		metadata, err := s.readSessionMetadata(sessionID)
 		if err != nil {
 			return nil, err
+		}
+		hasTitle := strings.TrimSpace(metadata.Title) != ""
+
+		path := filepath.Join(s.baseDir, sessionID, eventsFileName)
+		info, err := os.Stat(path)
+		hasEvents := !errors.Is(err, os.ErrNotExist)
+		if err != nil && hasEvents {
+			return nil, fmt.Errorf("stat session events: %w", err)
+		}
+		if hasEvents {
+			if ok, err := s.hasConversationEvents(ctx, sessionID); err != nil {
+				return nil, err
+			} else if !ok && !hasTitle {
+				continue
+			}
+		} else if !hasTitle {
+			continue
+		}
+
+		updatedAt := time.Now().UTC()
+		if hasEvents {
+			updatedAt = info.ModTime()
+		} else if metaInfo, err := os.Stat(filepath.Join(s.baseDir, sessionID, metadataFileName)); err == nil {
+			updatedAt = metaInfo.ModTime()
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("stat session metadata: %w", err)
 		}
 
 		sessions = append(sessions, SessionInfo{
 			ID:        sessionID,
 			Title:     metadata.Title,
-			UpdatedAt: info.ModTime(),
+			UpdatedAt: updatedAt,
 		})
 	}
 
@@ -221,6 +234,37 @@ func (s *JSONLStore) hasConversationEvents(ctx context.Context, sessionID string
 	return false, nil
 }
 
+// SessionExists reports whether a session has events or metadata.
+func (s *JSONLStore) SessionExists(ctx context.Context, sessionID string) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, fmt.Errorf("check session cancelled: %w", ctx.Err())
+	default:
+	}
+
+	eventPath, err := s.eventsPath(sessionID)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(eventPath); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("stat session events: %w", err)
+	}
+
+	metaPath, err := s.metadataPath(sessionID)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(metaPath); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("stat session metadata: %w", err)
+	}
+
+	return false, nil
+}
+
 // BaseDir returns the absolute event store directory.
 func (s *JSONLStore) BaseDir() string {
 	return s.baseDir
@@ -257,17 +301,6 @@ func (s *JSONLStore) RenameSession(ctx context.Context, sessionID string, title 
 	metaPath, err := s.metadataPath(sessionID)
 	if err != nil {
 		return false, err
-	}
-
-	// Only allow renaming if the session has persisted event logs.
-	eventPath, err := s.eventsPath(sessionID)
-	if err != nil {
-		return false, err
-	}
-	if _, err := os.Stat(eventPath); errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	} else if err != nil {
-		return false, fmt.Errorf("stat session events: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o700); err != nil {

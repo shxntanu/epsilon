@@ -309,11 +309,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			Foreground(tuiSubtle),
 		toolBlock: lipgloss.NewStyle().
 			Foreground(tuiInk).
-			Background(tuiSurface2).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderLeft(true).
-			BorderForeground(tuiAccentTool).
-			Padding(0, 1),
+			Background(tuiBackground),
 		diffBlock: lipgloss.NewStyle().
 			Foreground(tuiInk).
 			Background(tuiSurface).
@@ -336,8 +332,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			Foreground(tuiMuted),
 		tool: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(tuiAccentTool).
-			Bold(true),
+			Foreground(tuiAccentTool),
 		error: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Foreground(tuiAccentDanger).
@@ -813,7 +808,6 @@ func (m *model) applyEvent(event types.Event, interactive bool) {
 		if m.busy {
 			m.showSpinner = true
 		}
-		m.appendStatus("Thinking about the next step")
 	case types.EventModelTextDelta:
 		if event.TextDelta != "" {
 			m.showSpinner = false
@@ -1255,7 +1249,7 @@ func (m model) renderStatusEntry(entry transcriptEntry) string {
 }
 
 func (m model) renderToolEntry(entry transcriptEntry) string {
-	title := entry.text
+	title := renderToolTitle(entry)
 	if entry.toolActive {
 		title = m.spinner.View() + " " + title
 	}
@@ -1266,24 +1260,18 @@ func (m model) renderToolEntry(entry transcriptEntry) string {
 	}
 
 	lines := []string{title}
-	if !m.showEvents && !m.densityCompact() {
-		lines = append(lines, m.styles.muted.Render("ctrl+o shows tool input and output"))
-	}
 	if m.showEvents {
 		if detail := renderToolDetails(entry, m.styles.muted, m.styles.error); detail != "" {
-			lines = append(lines, detail)
+			lines = append(lines, indentLines(detail, "  "))
 		}
 	}
 
 	body := strings.Join(lines, "\n")
-	if m.density == densityCompact {
-		return body
-	}
-	return m.styles.toolBlock.Width(m.messageWidth()).Render(body)
+	return m.styles.toolBlock.Render(body)
 }
 
 func (m model) renderToolGroupEntry(entry transcriptEntry) string {
-	title := entry.text
+	title := renderToolTitle(entry)
 	if entry.toolActive {
 		title = m.spinner.View() + " " + title
 	}
@@ -1294,12 +1282,9 @@ func (m model) renderToolGroupEntry(entry transcriptEntry) string {
 	}
 
 	lines := []string{title}
-	if !m.showEvents && len(entry.tools) > 0 && !m.densityCompact() {
-		lines = append(lines, m.styles.muted.Render("ctrl+o expands grouped tool details"))
-	}
 	if m.showEvents {
 		for _, tool := range entry.tools {
-			nested := "  " + tool.text
+			nested := "  " + renderToolTitle(tool)
 			if tool.toolError {
 				nested = m.styles.error.Render(nested)
 			} else {
@@ -1313,10 +1298,7 @@ func (m model) renderToolGroupEntry(entry transcriptEntry) string {
 	}
 
 	body := strings.Join(lines, "\n")
-	if m.density == densityCompact {
-		return body
-	}
-	return m.styles.toolBlock.Width(m.messageWidth()).Render(body)
+	return m.styles.toolBlock.Render(body)
 }
 
 func (m model) renderDiff(diff string) string {
@@ -1427,6 +1409,23 @@ func renderToolDetails(entry transcriptEntry, muted lipgloss.Style, errorStyle l
 		lines = append(lines, muted.Render("metadata: ")+metadata)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderToolTitle(entry transcriptEntry) string {
+	if entry.kind == transcriptToolGroup {
+		return entry.text
+	}
+	name := strings.TrimSpace(entry.toolName)
+	if name == "" {
+		return entry.text
+	}
+	if entry.toolError {
+		return "failed " + name
+	}
+	if entry.toolActive {
+		return "using " + name
+	}
+	return name
 }
 
 func indentLines(text string, prefix string) string {

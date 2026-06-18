@@ -21,8 +21,6 @@ var (
 	ErrProviderMissing    = errors.New("provider missing")
 )
 
-const defaultMaxAgentTurns = 20
-
 type Session struct {
 	id              string
 	bus             *events.Bus
@@ -202,7 +200,11 @@ func (s *Session) Close(ctx context.Context) error {
 }
 
 func (s *Session) Step(ctx context.Context) error {
-	for turn := 0; turn < defaultMaxAgentTurns; turn++ {
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("agent step cancelled: %w", err)
+		}
+
 		messages, provider, toolRegistry, err := s.modelRequestState()
 		if err != nil {
 			return err
@@ -257,11 +259,6 @@ func (s *Session) Step(ctx context.Context) error {
 			return err
 		}
 	}
-
-	err := fmt.Errorf("agent step reached tool-call limit after %d model turns",
-		defaultMaxAgentTurns)
-	_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
-	return err
 }
 
 func (s *Session) currentRequestSettings() types.ModelRequestSettings {

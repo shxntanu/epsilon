@@ -115,3 +115,18 @@ func TestHydrateTranscriptEntriesHandlesPermissionHistory(t *testing.T) {
 		t.Fatalf("third entry = %#v, want session error", entries[2])
 	}
 }
+
+func TestModelStartedDoesNotAppendThinkingStatus(t *testing.T) {
+	m := model{streaming: -1}
+	m.applyEvent(types.Event{
+		Kind:      types.EventModelStarted,
+		CreatedAt: time.Now().UTC(),
+	}, false)
+
+	if len(m.entries) != 0 {
+		t.Fatalf("entries = %#v, want no transcript status for model start", m.entries)
+	}
+	if m.showSpinner {
+		t.Fatalf("showSpinner = true, want false when not busy")
+	}
+}

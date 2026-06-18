@@ -89,3 +89,37 @@ func TestJSONLStoreListSessionsIncludesTitle(t *testing.T) {
 		t.Fatalf("title = %q, want %q", sessions[0].Title, "Planning work")
 	}
 }
+
+func TestJSONLStoreRenameSessionWithoutEvents(t *testing.T) {
+	store, err := NewJSONLStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	ok, err := store.RenameSession(context.Background(), "session_a", "Planning work")
+	if err != nil {
+		t.Fatalf("rename session: %v", err)
+	}
+	if !ok {
+		t.Fatalf("rename session returned false")
+	}
+
+	exists, err := store.SessionExists(context.Background(), "session_a")
+	if err != nil {
+		t.Fatalf("session exists: %v", err)
+	}
+	if !exists {
+		t.Fatalf("session should exist after rename")
+	}
+
+	sessions, err := store.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(sessions))
+	}
+	if sessions[0].ID != "session_a" || sessions[0].Title != "Planning work" {
+		t.Fatalf("session = %#v, want session_a with title", sessions[0])
+	}
+}

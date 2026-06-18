@@ -341,14 +341,28 @@ func mergeStreamToolCalls(existing []chatToolCall, deltas []chatToolCall) []chat
 			call.Type = delta.Type
 		}
 		if delta.Function.Name != "" {
-			call.Function.Name += delta.Function.Name
+			call.Function.Name = mergeStreamField(call.Function.Name, delta.Function.Name)
 		}
 		if delta.Function.Arguments != "" {
-			call.Function.Arguments += delta.Function.Arguments
+			call.Function.Arguments = mergeStreamField(call.Function.Arguments,
+				delta.Function.Arguments)
 		}
 	}
 
 	return existing
+}
+
+func mergeStreamField(existing string, delta string) string {
+	if existing == "" {
+		return delta
+	}
+	if delta == "" || strings.HasPrefix(existing, delta) {
+		return existing
+	}
+	if strings.HasPrefix(delta, existing) {
+		return delta
+	}
+	return existing + delta
 }
 
 func convertMessages(messages []types.Message) []chatMessage {
@@ -429,6 +443,8 @@ func convertResponseToolCalls(calls []chatToolCall) []types.ToolCall {
 		input := json.RawMessage(strings.TrimSpace(call.Function.Arguments))
 		if len(input) == 0 {
 			input = json.RawMessage(`{}`)
+		} else if !json.Valid(input) {
+			input = json.RawMessage(`{"_invalid_input":true}`)
 		}
 
 		converted = append(converted, types.ToolCall{

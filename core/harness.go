@@ -116,7 +116,17 @@ func (h *Harness) ResumeSession(ctx context.Context, sessionID string) (*session
 		return nil, fmt.Errorf("load session events: %w", err)
 	}
 	if len(history) == 0 {
-		return nil, fmt.Errorf("session %q has no persisted events", sessionID)
+		checker, ok := h.eventStore.(events.SessionChecker)
+		if !ok {
+			return nil, fmt.Errorf("session %q has no persisted events", sessionID)
+		}
+		exists, err := checker.SessionExists(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, fmt.Errorf("session %q has no persisted events", sessionID)
+		}
 	}
 
 	sess := session.FromHistory(sessionID, h.eventBufferSize, h.provider,

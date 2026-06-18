@@ -26,7 +26,13 @@ type SessionLister interface {
 }
 
 // SessionRenamer updates persisted per-session metadata.
-// Implementations should return (false,nil) when the session does not exist.
+// Implementations may create a metadata-only session record when needed.
 type SessionRenamer interface {
 	RenameSession(ctx context.Context, sessionID string, title string) (bool, error)
+}
+
+// SessionChecker reports whether a persisted session record exists, even when
+// it has no conversation events yet.
+type SessionChecker interface {
+	SessionExists(ctx context.Context, sessionID string) (bool, error)
 }
