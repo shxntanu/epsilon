@@ -152,6 +152,7 @@ func NewDefaultRegistry() *Registry {
 	})
 	registry.Register(Command{
 		Name:        "model",
+		Aliases:     []string{"models"},
 		Usage:       "/model [name]",
 		Description: "show or change the model",
 		Handler: func(_ context.Context, exec Execution) (Result, error) {
