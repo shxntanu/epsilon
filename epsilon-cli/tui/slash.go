@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -178,6 +179,11 @@ func (m model) slashSelectorState() (string, []slash.Match, bool) {
 	return query, matches, true
 }
 
+func (m model) slashSelectorActive() bool {
+	_, _, ok := m.slashSelectorState()
+	return ok
+}
+
 func slashSelectorQuery(input string) (string, bool) {
 	text := strings.TrimLeft(input, " \t")
 	if text == "" || !strings.HasPrefix(text, "/") || strings.HasPrefix(text, "//") {
@@ -200,9 +206,9 @@ func (m model) slashSelectorHeight() int {
 		return 0
 	}
 	if len(matches) == 0 {
-		return 4
+		return 5
 	}
-	return len(matches) + 3
+	return len(matches) + 4
 }
 
 func (m model) renderSlashSelector() (string, bool) {
@@ -212,28 +218,50 @@ func (m model) renderSlashSelector() (string, bool) {
 	}
 
 	width := max(20, m.width-4)
-	lines := []string{m.styles.selectorTitle.Render("Slash commands")}
+	lines := []string{m.renderSelectorHeader("Slash commands", slashSelectorMeta(query, len(matches)))}
 	if len(matches) == 0 {
 		lines = append(lines, m.styles.muted.Render("No commands match /"+query))
+		lines = append(lines, m.renderSelectorHint("keep typing", "esc closes"))
 		return m.styles.selector.Width(width).Render(strings.Join(lines, "\n")), true
 	}
 
 	selected := m.clampedSlashCursor(len(matches))
 	for i, match := range matches {
-		line := "/" + match.Command.Name
-		if match.Command.Description != "" {
-			line += " " + m.styles.muted.Render(match.Command.Description)
-		}
-		if match.Alias != "" && match.Alias != match.Command.Name {
-			line += " " + m.styles.muted.Render("alias /"+match.Alias)
-		}
-		if i == selected {
-			line = m.styles.selectorActive.Render(line)
-		}
-		lines = append(lines, line)
+		lines = append(lines, m.renderSlashSelectorRow(match, i == selected, width-4))
 	}
+	lines = append(lines, m.renderSelectorHint("tab completes", "enter runs", "esc closes"))
 
 	return m.styles.selector.Width(width).Render(strings.Join(lines, "\n")), true
+}
+
+func slashSelectorMeta(query string, matches int) string {
+	if query == "" {
+		return fmt.Sprintf("%d commands", matches)
+	}
+	return fmt.Sprintf("/%s · %d matches", query, matches)
+}
+
+func (m model) renderSlashSelectorRow(match slash.Match, selected bool, width int) string {
+	name := m.styles.selectorKey.Render("/" + match.Command.Name)
+	description := strings.TrimSpace(match.Command.Description)
+	if description != "" {
+		description = m.styles.muted.Render(description)
+	}
+	if match.Alias != "" && match.Alias != match.Command.Name {
+		alias := m.styles.selectorMeta.Render("alias /" + match.Alias)
+		if description == "" {
+			description = alias
+		} else {
+			description += " " + alias
+		}
+	}
+
+	line := fitSelectorRow(name, description, width-2)
+	if selected {
+		line = activeSelectorMarker(m.headerFrame) + " " + line
+		return m.styles.selectorActive.Width(max(1, width)).Render(line)
+	}
+	return "  " + line
 }
 
 func (m *model) moveSlashSelection(delta int) bool {
@@ -285,17 +313,28 @@ func (m model) clampedSlashCursor(length int) int {
 func selectorStyles(base styles) styles {
 	base.selector = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(tuiLine).
+		BorderForeground(tuiAccentCommand).
 		Background(tuiSurface).
 		Foreground(tuiInk).
 		Padding(0, 1)
 	base.selectorActive = lipgloss.NewStyle().
-		Background(tuiSelected).
+		Background(tuiSurface3).
 		Foreground(tuiInkStrong).
 		Bold(true)
 	base.selectorTitle = lipgloss.NewStyle().
 		Background(tuiSurface).
-		Foreground(tuiAccentAgent).
+		Foreground(tuiAccentCommand).
 		Bold(true)
+	base.selectorMeta = lipgloss.NewStyle().
+		Background(tuiSurface2).
+		Foreground(tuiAccentInfo).
+		Padding(0, 1)
+	base.selectorKey = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(tuiInkStrong).
+		Bold(true)
+	base.selectorHint = lipgloss.NewStyle().
+		Background(tuiSurface).
+		Foreground(tuiFaint)
 	return base
 }

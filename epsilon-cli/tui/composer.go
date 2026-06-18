@@ -23,7 +23,7 @@ type composer struct {
 func newComposer() composer {
 	input := textarea.New()
 	input.Placeholder = "Message epsilon..."
-	input.Prompt = ""
+	input.Prompt = "┃ "
 	input.ShowLineNumbers = false
 	input.EndOfBufferCharacter = ' '
 	input.SetHeight(comfortableChatBoxInputHeight)
@@ -34,6 +34,10 @@ func newComposer() composer {
 	styles.Focused.Text = lipgloss.NewStyle().
 		Background(tuiBackground).
 		Foreground(tuiInk)
+	styles.Focused.Prompt = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(tuiAccentAgent).
+		Bold(true)
 	styles.Focused.CursorLine = lipgloss.NewStyle().Background(tuiSurface2)
 	styles.Focused.Placeholder = lipgloss.NewStyle().
 		Background(tuiBackground).
@@ -46,6 +50,9 @@ func newComposer() composer {
 	styles.Blurred.Text = lipgloss.NewStyle().
 		Background(tuiBackground).
 		Foreground(tuiInk)
+	styles.Blurred.Prompt = lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(tuiSubtle)
 	styles.Blurred.CursorLine = lipgloss.NewStyle().Background(tuiBackground)
 	styles.Blurred.Placeholder = lipgloss.NewStyle().
 		Background(tuiBackground).
@@ -86,8 +93,39 @@ func (c composer) Update(msg tea.Msg) (composer, tea.Cmd) {
 	return c, cmd
 }
 
-func (c composer) View() string {
-	return c.style.Width(max(0, c.width-4)).Render(c.input.View())
+func (c composer) View(slashMode bool, frame int) string {
+	style := c.style
+	modeColor := tuiAccentAgent
+	modeLabel := "message"
+	modeHint := "enter sends · shift+enter newline"
+	modeMark := "✦"
+	if slashMode {
+		modeColor = tuiAccentCommand
+		modeLabel = "command"
+		modeHint = "tab completes · enter runs"
+		modeMark = activeSelectorMarker(frame)
+	}
+
+	mode := lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		lipgloss.NewStyle().
+			Background(tuiSurface).
+			Foreground(modeColor).
+			Bold(true).
+			Padding(0, 1).
+			Render(modeMark+" "+modeLabel),
+		" ",
+		lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(tuiFaint).
+			Render(modeHint),
+	)
+	if slashMode {
+		style = style.BorderForeground(tuiAccentCommand)
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, mode, c.input.View())
+	return style.Width(max(0, c.width-4)).Render(content)
 }
 
 func (c composer) Value() string {
@@ -101,7 +139,7 @@ func (c *composer) SetValue(value string) {
 
 func (c *composer) SetWidth(width int) {
 	c.width = width
-	c.input.SetWidth(max(20, width-8))
+	c.input.SetWidth(max(20, width-10))
 }
 
 func (c *composer) SetDensity(density densityMode) {
@@ -113,7 +151,7 @@ func (c *composer) SetDensity(density densityMode) {
 }
 
 func (c composer) Height() int {
-	return c.input.Height() + 2
+	return c.input.Height() + 3
 }
 
 func (c *composer) Submit() (string, bool) {

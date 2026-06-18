@@ -30,8 +30,8 @@ func (m *model) startHeaderAnimation() tea.Cmd {
 func (m model) shouldAnimateHeader() bool {
 	status := strings.TrimSpace(m.status)
 	return m.busy || m.showSpinner || m.hasActiveTools() || m.permission != nil ||
-		m.modelPicker != nil || m.sessionPicker != nil || status == "thinking" ||
-		status == "approval" || status == "resuming" ||
+		m.modelPicker != nil || m.sessionPicker != nil || m.slashSelectorActive() ||
+		status == "thinking" || status == "approval" || status == "resuming" ||
 		hasStatusPrefix(status, "models") || hasStatusPrefix(status, "sessions")
 }
 

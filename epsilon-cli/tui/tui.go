@@ -183,6 +183,9 @@ type styles struct {
 	selector       lipgloss.Style
 	selectorActive lipgloss.Style
 	selectorTitle  lipgloss.Style
+	selectorMeta   lipgloss.Style
+	selectorKey    lipgloss.Style
+	selectorHint   lipgloss.Style
 	tool           lipgloss.Style
 	error          lipgloss.Style
 	muted          lipgloss.Style
@@ -618,7 +621,8 @@ func (m model) View() tea.View {
 	if picker, ok := m.renderSessionPicker(); ok {
 		parts = append(parts, picker)
 	}
-	parts = append(parts, m.composer.View(), contextLine, help, bottomGutter)
+	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.headerFrame),
+		contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	content = m.styles.screen.
 		Width(max(0, m.width)).

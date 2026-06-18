@@ -57,6 +57,42 @@ func TestSlashSelectorQuery(t *testing.T) {
 	}
 }
 
+func TestRenderSlashSelectorUsesCommandPaletteTreatment(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("/")
+	m := model{
+		width:    100,
+		composer: composer,
+		slash:    slash.NewDefaultRegistry(),
+		styles: selectorStyles(styles{
+			muted: lipgloss.NewStyle(),
+		}),
+	}
+
+	rendered, ok := m.renderSlashSelector()
+	if !ok {
+		t.Fatal("selector did not render")
+	}
+	plain := plainANSI(rendered)
+	for _, want := range []string{"✦ Slash commands", "commands", "▸ /clear", "tab completes"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("selector missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestComposerViewShowsCommandMode(t *testing.T) {
+	composer := newComposer()
+	composer.SetWidth(80)
+
+	view := plainANSI(composer.View(true, 1))
+	for _, want := range []string{"command", "tab completes"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("composer command mode missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestDensityModeFromSlash(t *testing.T) {
 	if got := densityModeFromSlash(slash.DensityCompact); got != densityCompact {
 		t.Fatalf("compact density = %v, want compact", got)

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -243,21 +244,21 @@ func (m model) renderSessionPicker() (string, bool) {
 	if m.sessionPicker.query != "" {
 		title += " / " + m.sessionPicker.query
 	}
-	lines := []string{m.styles.selectorTitle.Render(title)}
+	lines := []string{m.renderSelectorHeader(title, sessionPickerMeta(m.sessionPicker))}
 	switch {
 	case m.sessionPicker.loading:
 		lines = append(lines, m.styles.muted.Render("Loading sessions..."))
 	case m.sessionPicker.err != "":
 		lines = append(lines, m.styles.error.Render(m.sessionPicker.err))
-		lines = append(lines, m.styles.muted.Render("Esc closes"))
+		lines = append(lines, m.renderSelectorHint("esc closes"))
 	case len(m.sessionPicker.sessions) == 0:
 		lines = append(lines, m.styles.muted.Render("No sessions available"))
 	case len(m.sessionPicker.filtered) == 0:
 		lines = append(lines, m.styles.muted.Render("No sessions match"))
-		lines = append(lines, m.styles.muted.Render("Type to search, Esc closes"))
+		lines = append(lines, m.renderSelectorHint("type to search", "esc closes"))
 	default:
 		lines = append(lines, m.renderSessionRows(width-4)...)
-		lines = append(lines, m.styles.muted.Render("Type to search, Enter resumes, Esc closes"))
+		lines = append(lines, m.renderSelectorHint("type to search", "enter resumes", "esc closes"))
 	}
 
 	return m.styles.selector.Width(width).Render(strings.Join(lines, "\n")), true
@@ -277,11 +278,30 @@ func (m model) renderSessionRows(width int) []string {
 		sessionInfo := visible[i]
 		line := formatSessionRow(sessionInfo, current, width)
 		if i == picker.cursor {
-			line = m.styles.selectorActive.Render(line)
+			line = activeSelectorMarker(m.headerFrame) + " " + line
+			line = m.styles.selectorActive.Width(max(1, width)).Render(line)
+		} else {
+			line = "  " + line
 		}
 		rows = append(rows, line)
 	}
 	return rows
+}
+
+func sessionPickerMeta(picker *sessionPicker) string {
+	if picker == nil {
+		return ""
+	}
+	if picker.loading {
+		return "loading"
+	}
+	if picker.err != "" {
+		return "needs attention"
+	}
+	if picker.query != "" {
+		return fmt.Sprintf("%d matches", len(picker.filtered))
+	}
+	return fmt.Sprintf("%d saved", len(picker.sessions))
 }
 
 func (p *sessionPicker) appendQueryText(text string, current string) bool {

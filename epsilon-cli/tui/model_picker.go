@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -177,21 +178,21 @@ func (m model) renderModelPicker() (string, bool) {
 	if m.modelPicker.query != "" {
 		title += " / " + m.modelPicker.query
 	}
-	lines := []string{m.styles.selectorTitle.Render(title)}
+	lines := []string{m.renderSelectorHeader(title, modelPickerMeta(m.modelPicker))}
 	switch {
 	case m.modelPicker.loading:
 		lines = append(lines, m.styles.muted.Render("Loading models..."))
 	case m.modelPicker.err != "":
 		lines = append(lines, m.styles.error.Render(m.modelPicker.err))
-		lines = append(lines, m.styles.muted.Render("Esc closes"))
+		lines = append(lines, m.renderSelectorHint("esc closes"))
 	case len(m.modelPicker.models) == 0:
 		lines = append(lines, m.styles.muted.Render("No models available"))
 	case len(m.modelPicker.filtered) == 0:
 		lines = append(lines, m.styles.muted.Render("No models match"))
-		lines = append(lines, m.styles.muted.Render("Type to search, Esc closes"))
+		lines = append(lines, m.renderSelectorHint("type to search", "esc closes"))
 	default:
 		lines = append(lines, m.renderModelRows(width-4)...)
-		lines = append(lines, m.styles.muted.Render("Type to search, Enter selects, Esc closes"))
+		lines = append(lines, m.renderSelectorHint("type to search", "enter selects", "esc closes"))
 	}
 
 	return m.styles.selector.Width(width).Render(strings.Join(lines, "\n")), true
@@ -211,11 +212,30 @@ func (m model) renderModelRows(width int) []string {
 		model := visible[i]
 		line := formatModelRow(model, current, width)
 		if i == picker.cursor {
-			line = m.styles.selectorActive.Render(line)
+			line = activeSelectorMarker(m.headerFrame) + " " + line
+			line = m.styles.selectorActive.Width(max(1, width)).Render(line)
+		} else {
+			line = "  " + line
 		}
 		rows = append(rows, line)
 	}
 	return rows
+}
+
+func modelPickerMeta(picker *modelPicker) string {
+	if picker == nil {
+		return ""
+	}
+	if picker.loading {
+		return "loading"
+	}
+	if picker.err != "" {
+		return "needs attention"
+	}
+	if picker.query != "" {
+		return fmt.Sprintf("%d matches", len(picker.filtered))
+	}
+	return fmt.Sprintf("%d available", len(picker.models))
 }
 
 func (p *modelPicker) appendQueryText(text string, current string) bool {
