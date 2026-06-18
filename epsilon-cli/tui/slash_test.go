@@ -146,6 +146,18 @@ func TestRenderToolGroupHidesNestedDetailsUntilExpanded(t *testing.T) {
 	}
 }
 
+func TestDefaultSessionTitle(t *testing.T) {
+	got := defaultSessionTitle("  please   trace\nthis conversation clearly  ", 18)
+	if got != "please trace this" {
+		t.Fatalf("title = %q, want %q", got, "please trace this")
+	}
+
+	got = defaultSessionTitle("hello 世界 from epsilon", 8)
+	if got != "hello 世界" {
+		t.Fatalf("unicode title = %q, want %q", got, "hello 世界")
+	}
+}
+
 func TestModelPickerSelectsCurrentModel(t *testing.T) {
 	models := []types.ModelInfo{
 		{ID: "gpt-4o"},

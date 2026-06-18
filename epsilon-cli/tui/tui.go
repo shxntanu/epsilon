@@ -114,6 +114,7 @@ type resumeSessionMsg struct {
 }
 
 const bottomGutterHeight = 1
+const defaultSessionTitleMaxRunes = 48
 
 type model struct {
 	ctx           context.Context
@@ -734,6 +735,11 @@ func (m *model) submit() tea.Cmd {
 
 	m.appendUserMessage(text)
 	m.pendingUsers = append(m.pendingUsers, text)
+	shouldDefaultTitle := !m.session.HasMessages() && strings.TrimSpace(m.sessionTitle) == ""
+	defaultTitle := defaultSessionTitle(text, defaultSessionTitleMaxRunes)
+	if shouldDefaultTitle && defaultTitle != "" {
+		m.sessionTitle = defaultTitle
+	}
 	m.busy = true
 	m.showSpinner = true
 	m.followOutput = true
@@ -743,6 +749,9 @@ func (m *model) submit() tea.Cmd {
 	sessionStep := func() tea.Msg {
 		if err := m.session.Send(m.ctx, types.UserMessage(text)); err != nil {
 			return stepDoneMsg{err: err}
+		}
+		if shouldDefaultTitle && defaultTitle != "" && m.renameSession != nil {
+			_, _ = m.renameSession(m.ctx, m.session.ID(), defaultTitle)
 		}
 		if err := m.session.Step(m.ctx); err != nil {
 			return stepDoneMsg{err: err}
@@ -1457,6 +1466,19 @@ func pluralize(count int, singular string, plural string) string {
 		return singular
 	}
 	return plural
+}
+
+func defaultSessionTitle(prompt string, maxRunes int) string {
+	title := strings.Join(strings.Fields(prompt), " ")
+	if maxRunes <= 0 {
+		return title
+	}
+
+	runes := []rune(title)
+	if len(runes) <= maxRunes {
+		return title
+	}
+	return strings.TrimSpace(string(runes[:maxRunes]))
 }
 
 func toolRequestedText(name string) string {
