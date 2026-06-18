@@ -117,46 +117,48 @@ const bottomGutterHeight = 1
 const defaultSessionTitleMaxRunes = 48
 
 type model struct {
-	ctx           context.Context
-	session       *session.Session
-	subscription  *events.Subscription
-	events        <-chan types.Event
-	composer      composer
-	slash         *slash.Registry
-	slashCursor   int
-	spinner       spinner.Model
-	viewport      viewport.Model
-	contextView   func() contextwindow.Summary
-	modelInfo     func() (types.ModelInfo, bool)
-	listModels    func(context.Context) ([]types.ModelInfo, error)
-	listSessions  func(context.Context) ([]events.SessionInfo, error)
-	resumeSession func(context.Context, string) (*session.Session, error)
-	currentModel  func() string
-	currentEffort func() string
-	setModel      func(context.Context, string) error
-	setEffort     func(string) error
-	renameSession func(context.Context, string, string) (bool, error)
-	modelPicker   *modelPicker
-	sessionPicker *sessionPicker
-	permission    *permissionPrompt
-	entries       []transcriptEntry
-	pendingUsers  []string
-	dirty         bool
-	followOutput  bool
-	width         int
-	height        int
-	busy          bool
-	showSpinner   bool
-	showEvents    bool
-	showContext   bool
-	mouseCapture  bool
-	density       densityMode
-	status        string
-	sessionTitle  string
-	styles        styles
-	broker        *PermissionBroker
-	streaming     int
-	quitArmed     bool
+	ctx             context.Context
+	session         *session.Session
+	subscription    *events.Subscription
+	events          <-chan types.Event
+	composer        composer
+	slash           *slash.Registry
+	slashCursor     int
+	spinner         spinner.Model
+	viewport        viewport.Model
+	contextView     func() contextwindow.Summary
+	modelInfo       func() (types.ModelInfo, bool)
+	listModels      func(context.Context) ([]types.ModelInfo, error)
+	listSessions    func(context.Context) ([]events.SessionInfo, error)
+	resumeSession   func(context.Context, string) (*session.Session, error)
+	currentModel    func() string
+	currentEffort   func() string
+	setModel        func(context.Context, string) error
+	setEffort       func(string) error
+	renameSession   func(context.Context, string, string) (bool, error)
+	modelPicker     *modelPicker
+	sessionPicker   *sessionPicker
+	permission      *permissionPrompt
+	entries         []transcriptEntry
+	pendingUsers    []string
+	dirty           bool
+	followOutput    bool
+	width           int
+	height          int
+	busy            bool
+	showSpinner     bool
+	showEvents      bool
+	showContext     bool
+	mouseCapture    bool
+	density         densityMode
+	status          string
+	sessionTitle    string
+	headerFrame     int
+	headerAnimating bool
+	styles          styles
+	broker          *PermissionBroker
+	streaming       int
+	quitArmed       bool
 }
 
 type styles struct {
@@ -392,7 +394,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.composer.Init(), m.waitForEvent())
+	return tea.Batch(m.composer.Init(), m.waitForEvent(), m.startHeaderAnimation())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -409,6 +411,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			if cmd := m.startHeaderAnimation(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			m.syncViewport()
 			return m, tea.Batch(cmds...)
 		}
@@ -417,12 +422,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			if cmd := m.startHeaderAnimation(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			m.syncViewport()
 			return m, tea.Batch(cmds...)
 		}
 		if m.sessionPicker != nil {
 			cmd := m.updateSessionPicker(msg)
 			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			if cmd := m.startHeaderAnimation(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			m.syncViewport()
@@ -549,6 +560,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dirty = true
 			cmds = append(cmds, cmd)
 		}
+	case headerTickMsg:
+		m.headerAnimating = false
+		if m.shouldAnimateHeader() {
+			m.headerFrame++
+		}
 	case stepDoneMsg:
 		m.busy = false
 		m.showSpinner = false
@@ -569,19 +585,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 	}
 
+	if cmd := m.startHeaderAnimation(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	m.syncViewport()
 	return m, tea.Batch(cmds...)
 }
 
 func (m model) View() tea.View {
-	headerText := lipgloss.JoinHorizontal(
-		lipgloss.Center,
-		m.styles.title.Render("epsilon"),
-		" ",
-		m.styles.sessionName.Render(m.currentSessionLabel()),
-		" ",
-		m.renderStatusBadge(),
-	)
+	headerText := m.renderHeaderText(m.width)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	help := m.styles.help.Render("ctrl+o details:" + onOff(m.showEvents) +
 		" | ctrl+x context:" + onOff(m.showContext) +
@@ -627,14 +639,6 @@ func (m model) currentSessionLabel() string {
 		return title
 	}
 	return m.session.ID()
-}
-
-func (m model) renderStatusBadge() string {
-	status := strings.TrimSpace(m.status)
-	if status == "" || status == "ready" {
-		return statusBadgeStyle("ready").Render("Ready")
-	}
-	return statusBadgeStyle(status).Render(status)
 }
 
 func (m model) currentMouseMode() tea.MouseMode {

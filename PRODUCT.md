@@ -2,7 +2,7 @@
 
 ## Register
 
-product
+Epsilon
 
 ## Users
 
