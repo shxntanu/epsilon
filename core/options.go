@@ -176,6 +176,11 @@ func WithDefaultTools(workspaceRoot string) Option {
 			return fmt.Errorf("create grep_search tool: %w", err)
 		}
 
+		ripgrepTool, err := tools.NewRipgrepTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create ripgrep tool: %w", err)
+		}
+
 		listDirTool, err := tools.NewListDirTool(workspaceRoot)
 		if err != nil {
 			return fmt.Errorf("create list_dir tool: %w", err)
@@ -206,7 +211,7 @@ func WithDefaultTools(workspaceRoot string) Option {
 			return fmt.Errorf("create apply_patch tool: %w", err)
 		}
 
-		return WithTools(readFileTool, writeFileTool, grepTool, listDirTool,
+		return WithTools(readFileTool, writeFileTool, grepTool, ripgrepTool, listDirTool,
 			fileTreeTool, gitStatusTool, gitDiffTool, bashTool, patchTool)(h)
 	}
 }

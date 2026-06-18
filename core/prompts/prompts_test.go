@@ -39,6 +39,7 @@ func TestDefaultAgentPromptIsCompactAndGuidesToolUse(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Inspect the repo before editing",
+		"Use `ripgrep` for fast text search",
 		"start_line",
 		"end_line",
 		"Avoid full-file reads",

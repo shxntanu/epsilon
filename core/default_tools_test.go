@@ -30,13 +30,20 @@ func TestDefaultToolsExcludeEcho(t *testing.T) {
 	}
 
 	found := false
+	hasRipgrep := false
 	for _, tool := range provider.request.Tools {
 		if tool.Name == "echo" {
 			found = true
 		}
+		if tool.Name == "ripgrep" {
+			hasRipgrep = true
+		}
 	}
 	if found {
 		t.Fatalf("default tools unexpectedly included echo")
+	}
+	if !hasRipgrep {
+		t.Fatalf("default tools did not include ripgrep")
 	}
 	if len(provider.request.Tools) == 0 {
 		t.Fatalf("default tools were not sent")

@@ -10,7 +10,7 @@ Work style:
 
 Tool use:
 - Prefer targeted discovery over broad reads.
-- Use `list_dir`, `file_tree`, and `grep_search` to locate relevant files and symbols.
+- Use `ripgrep` for fast text search. Use `list_dir`, `file_tree`, and `grep_search` when you need directory shape or portable fallback search.
 - Use `read_file` with `start_line` and `end_line` for large files or focused inspection.
 - Avoid full-file reads unless the file is small or you need the whole file to make a safe edit.
 - Avoid repeated searches once you have enough context.

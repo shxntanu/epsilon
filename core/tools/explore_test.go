@@ -100,6 +100,7 @@ func TestToolDefinitionsHaveValidCompactSchemas(t *testing.T) {
 		func(root string) (Tool, error) { return NewReadFileTool(root) },
 		func(root string) (Tool, error) { return NewWriteFileTool(root) },
 		func(root string) (Tool, error) { return NewGrepTool(root) },
+		func(root string) (Tool, error) { return NewRipgrepTool(root) },
 		func(root string) (Tool, error) { return NewListDirTool(root) },
 		func(root string) (Tool, error) { return NewFileTreeTool(root) },
 		func(root string) (Tool, error) { return NewGitStatusTool(root) },
@@ -118,6 +119,98 @@ func TestToolDefinitionsHaveValidCompactSchemas(t *testing.T) {
 		if len(tool.Description()) > 100 {
 			t.Fatalf("%s description too long: %q", tool.Name(), tool.Description())
 		}
+	}
+}
+
+func TestRipgrepToolFindsMatches(t *testing.T) {
+	requireRipgrep(t)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "sample.go"),
+		[]byte("package sample\n\nfunc Target() {}\n"), 0o644); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sample.txt"),
+		[]byte("Target in text\n"), 0o644); err != nil {
+		t.Fatalf("write text: %v", err)
+	}
+
+	tool, err := NewRipgrepTool(dir)
+	if err != nil {
+		t.Fatalf("new ripgrep tool: %v", err)
+	}
+	result := runTool(t, tool, map[string]any{
+		"pattern": "Target",
+		"glob":    "*.go",
+	})
+
+	text := result.Content[0].Text
+	if !strings.Contains(text, "sample.go") || !strings.Contains(text, "func Target") {
+		t.Fatalf("ripgrep output missing Go match:\n%s", text)
+	}
+	if strings.Contains(text, "sample.txt") {
+		t.Fatalf("ripgrep output ignored glob:\n%s", text)
+	}
+	if result.Metadata["exit_code"] != "0" {
+		t.Fatalf("exit_code = %s, want 0", result.Metadata["exit_code"])
+	}
+}
+
+func TestRipgrepToolNoMatchesIsNotError(t *testing.T) {
+	requireRipgrep(t)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "sample.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+
+	tool, err := NewRipgrepTool(dir)
+	if err != nil {
+		t.Fatalf("new ripgrep tool: %v", err)
+	}
+	result, err := tool.Run(context.Background(), mustJSON(t, map[string]any{
+		"pattern": "missing",
+	}))
+	if err != nil {
+		t.Fatalf("run ripgrep: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("no-match ripgrep result should not be an error: %s", result.Content[0].Text)
+	}
+	if result.Content[0].Text != "No matches found." {
+		t.Fatalf("content = %q, want no matches", result.Content[0].Text)
+	}
+	if result.Metadata["exit_code"] != "1" {
+		t.Fatalf("exit_code = %s, want 1", result.Metadata["exit_code"])
+	}
+}
+
+func TestRipgrepToolTruncatesOutput(t *testing.T) {
+	requireRipgrep(t)
+
+	dir := t.TempDir()
+	var content strings.Builder
+	for i := 0; i < 200; i++ {
+		content.WriteString("needle ")
+		content.WriteString(strings.Repeat("x", 80))
+		content.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(dir, "many.txt"), []byte(content.String()), 0o644); err != nil {
+		t.Fatalf("write many: %v", err)
+	}
+
+	tool, err := NewRipgrepTool(dir)
+	if err != nil {
+		t.Fatalf("new ripgrep tool: %v", err)
+	}
+	tool.maxBytes = 256
+	result := runTool(t, tool, map[string]any{"pattern": "needle"})
+
+	if result.Metadata["stdout_truncated"] != "true" {
+		t.Fatalf("stdout_truncated = %s, want true", result.Metadata["stdout_truncated"])
+	}
+	if !strings.Contains(result.Content[0].Text, "[truncated") {
+		t.Fatalf("expected truncation marker:\n%s", result.Content[0].Text)
 	}
 }
 
@@ -171,10 +264,7 @@ func TestGrepToolTruncatesLongLines(t *testing.T) {
 
 func runTool(t *testing.T, tool Tool, input map[string]any) *types.ToolResult {
 	t.Helper()
-	data, err := json.Marshal(input)
-	if err != nil {
-		t.Fatalf("marshal input: %v", err)
-	}
+	data := mustJSON(t, input)
 	result, err := tool.Run(context.Background(), data)
 	if err != nil {
 		t.Fatalf("run %s: %v", tool.Name(), err)
@@ -186,6 +276,22 @@ func runTool(t *testing.T, tool Tool, input map[string]any) *types.ToolResult {
 		t.Fatalf("%s returned error: %s", tool.Name(), result.Content[0].Text)
 	}
 	return result
+}
+
+func mustJSON(t *testing.T, input map[string]any) []byte {
+	t.Helper()
+	data, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+	return data
+}
+
+func requireRipgrep(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("rg"); err != nil {
+		t.Skip("rg is not installed")
+	}
 }
 
 func runGitCommand(t *testing.T, dir string, args ...string) {
