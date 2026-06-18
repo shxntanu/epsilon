@@ -100,6 +100,52 @@ func TestRenderToolEntryHidesDetailsUntilExpanded(t *testing.T) {
 	}
 }
 
+func TestRenderToolGroupHidesNestedDetailsUntilExpanded(t *testing.T) {
+	m := model{
+		width:   80,
+		density: densityCompact,
+		styles: styles{
+			tool:      lipgloss.NewStyle(),
+			error:     lipgloss.NewStyle(),
+			muted:     lipgloss.NewStyle(),
+			toolBlock: lipgloss.NewStyle(),
+		},
+	}
+	entry := transcriptEntry{
+		kind: transcriptToolGroup,
+		text: "Explored 2 items: read_file, ripgrep",
+		tools: []transcriptEntry{
+			{
+				kind:       transcriptTool,
+				text:       "Used read_file",
+				toolName:   "read_file",
+				toolInput:  `{"path":"README.md"}`,
+				toolResult: "project docs",
+			},
+			{
+				kind:       transcriptTool,
+				text:       "Used ripgrep",
+				toolName:   "ripgrep",
+				toolInput:  `{"pattern":"TODO"}`,
+				toolResult: "No matches found.",
+			},
+		},
+	}
+
+	collapsed := m.renderToolGroupEntry(entry)
+	if strings.Contains(collapsed, "project docs") || strings.Contains(collapsed, "No matches found") {
+		t.Fatalf("collapsed tool group leaked details:\n%s", collapsed)
+	}
+
+	m.showEvents = true
+	expanded := m.renderToolGroupEntry(entry)
+	for _, want := range []string{"Explored 2 items", "Used read_file", `{"path":"README.md"}`, "No matches found."} {
+		if !strings.Contains(expanded, want) {
+			t.Fatalf("expanded tool group missing %q:\n%s", want, expanded)
+		}
+	}
+}
+
 func TestModelPickerSelectsCurrentModel(t *testing.T) {
 	models := []types.ModelInfo{
 		{ID: "gpt-4o"},

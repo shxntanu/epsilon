@@ -195,6 +195,7 @@ const (
 	transcriptDiff
 	transcriptStatus
 	transcriptTool
+	transcriptToolGroup
 )
 
 type transcriptEntry struct {
@@ -207,6 +208,7 @@ type transcriptEntry struct {
 	toolMeta   map[string]string
 	toolError  bool
 	toolActive bool
+	tools      []transcriptEntry
 }
 
 type densityMode int
@@ -884,66 +886,147 @@ func (m *model) appendStatus(text string) {
 }
 
 func (m *model) appendToolRequested(call types.ToolCall) {
-	m.entries = append(m.entries, transcriptEntry{
+	entry := transcriptEntry{
 		kind:       transcriptTool,
 		text:       toolRequestedText(call.Name),
 		toolCallID: call.ID,
 		toolName:   call.Name,
 		toolInput:  strings.TrimSpace(string(call.Input)),
-	})
+	}
+	if m.appendExplorationTool(entry) {
+		m.dirty = true
+		return
+	}
+	m.entries = append(m.entries, entry)
 	m.dirty = true
 }
 
 func (m *model) markToolStarted(call types.ToolCall) {
-	index := m.findToolEntry(call.ID)
+	index, childIndex := m.findToolEntry(call.ID)
 	if index < 0 {
 		m.appendToolRequested(call)
-		index = len(m.entries) - 1
+		index, childIndex = m.findToolEntry(call.ID)
+		if index < 0 {
+			return
+		}
 	}
-	m.entries[index].text = toolRunningText(call.Name)
-	m.entries[index].toolActive = true
-	m.entries[index].toolName = call.Name
-	if strings.TrimSpace(m.entries[index].toolInput) == "" {
-		m.entries[index].toolInput = strings.TrimSpace(string(call.Input))
+	entry := m.toolEntryAt(index, childIndex)
+	entry.text = toolRunningText(call.Name)
+	entry.toolActive = true
+	entry.toolName = call.Name
+	if strings.TrimSpace(entry.toolInput) == "" {
+		entry.toolInput = strings.TrimSpace(string(call.Input))
 	}
+	m.setToolEntryAt(index, childIndex, entry)
+	m.refreshToolGroup(index)
 	m.dirty = true
 }
 
 func (m *model) markToolCompleted(call types.ToolCall, result types.ToolResult) {
-	index := m.findToolEntry(call.ID)
+	index, childIndex := m.findToolEntry(call.ID)
 	if index < 0 {
 		m.appendToolRequested(call)
-		index = len(m.entries) - 1
+		index, childIndex = m.findToolEntry(call.ID)
+		if index < 0 {
+			return
+		}
 	}
-	m.entries[index].toolActive = false
-	m.entries[index].toolName = call.Name
-	m.entries[index].toolInput = strings.TrimSpace(string(call.Input))
-	m.entries[index].toolResult = textFromContent(result.Content)
-	m.entries[index].toolMeta = result.Metadata
-	m.entries[index].toolError = result.IsError
+	entry := m.toolEntryAt(index, childIndex)
+	entry.toolActive = false
+	entry.toolName = call.Name
+	entry.toolInput = strings.TrimSpace(string(call.Input))
+	entry.toolResult = textFromContent(result.Content)
+	entry.toolMeta = result.Metadata
+	entry.toolError = result.IsError
 	if result.IsError {
-		m.entries[index].text = "Tool failed: " + call.Name
+		entry.text = "Tool failed: " + call.Name
 	} else {
-		m.entries[index].text = toolCompletedText(call.Name)
+		entry.text = toolCompletedText(call.Name)
 	}
+	m.setToolEntryAt(index, childIndex, entry)
+	m.refreshToolGroup(index)
 	m.dirty = true
 }
 
-func (m model) findToolEntry(callID string) int {
+func (m *model) appendExplorationTool(entry transcriptEntry) bool {
+	if !isExplorationTool(entry.toolName) {
+		return false
+	}
+	index := len(m.entries) - 1
+	if index >= 0 && m.entries[index].kind == transcriptToolGroup {
+		m.entries[index].tools = append(m.entries[index].tools, entry)
+		m.refreshToolGroup(index)
+		return true
+	}
+	if index >= 0 && m.entries[index].kind == transcriptTool &&
+		isExplorationTool(m.entries[index].toolName) {
+		m.entries[index] = transcriptEntry{
+			kind:  transcriptToolGroup,
+			tools: []transcriptEntry{m.entries[index], entry},
+		}
+		m.refreshToolGroup(index)
+		return true
+	}
+	return false
+}
+
+func (m *model) refreshToolGroup(index int) {
+	if index < 0 || index >= len(m.entries) || m.entries[index].kind != transcriptToolGroup {
+		return
+	}
+	group := &m.entries[index]
+	active := false
+	failed := 0
+	for _, tool := range group.tools {
+		if tool.toolActive {
+			active = true
+		}
+		if tool.toolError {
+			failed++
+		}
+	}
+	group.toolActive = active
+	group.toolError = failed > 0
+	group.text = toolGroupText(group.tools, active, failed)
+}
+
+func (m model) toolEntryAt(index int, childIndex int) transcriptEntry {
+	if childIndex >= 0 {
+		return m.entries[index].tools[childIndex]
+	}
+	return m.entries[index]
+}
+
+func (m *model) setToolEntryAt(index int, childIndex int, entry transcriptEntry) {
+	if childIndex >= 0 {
+		m.entries[index].tools[childIndex] = entry
+		return
+	}
+	m.entries[index] = entry
+}
+
+func (m model) findToolEntry(callID string) (int, int) {
 	if callID == "" {
-		return -1
+		return -1, -1
 	}
 	for i := len(m.entries) - 1; i >= 0; i-- {
 		if m.entries[i].kind == transcriptTool && m.entries[i].toolCallID == callID {
-			return i
+			return i, -1
+		}
+		if m.entries[i].kind == transcriptToolGroup {
+			for j := len(m.entries[i].tools) - 1; j >= 0; j-- {
+				if m.entries[i].tools[j].toolCallID == callID {
+					return i, j
+				}
+			}
 		}
 	}
-	return -1
+	return -1, -1
 }
 
 func (m model) hasActiveTools() bool {
 	for _, entry := range m.entries {
-		if entry.kind == transcriptTool && entry.toolActive {
+		if (entry.kind == transcriptTool || entry.kind == transcriptToolGroup) && entry.toolActive {
 			return true
 		}
 	}
@@ -1104,6 +1187,8 @@ func (m model) renderTranscriptEntry(entry transcriptEntry) (string, bool) {
 		return m.renderStatusEntry(entry), true
 	case transcriptTool:
 		return m.renderToolEntry(entry), true
+	case transcriptToolGroup:
+		return m.renderToolGroupEntry(entry), true
 	default:
 		return entry.text, true
 	}
@@ -1166,6 +1251,40 @@ func (m model) renderToolEntry(entry transcriptEntry) string {
 	if m.showEvents {
 		if detail := renderToolDetails(entry, m.styles.muted, m.styles.error); detail != "" {
 			lines = append(lines, detail)
+		}
+	}
+
+	body := strings.Join(lines, "\n")
+	if m.density == densityCompact {
+		return body
+	}
+	return m.styles.toolBlock.Width(m.messageWidth()).Render(body)
+}
+
+func (m model) renderToolGroupEntry(entry transcriptEntry) string {
+	title := entry.text
+	if entry.toolActive {
+		title = m.spinner.View() + " " + title
+	}
+	if entry.toolError {
+		title = m.styles.error.Render(title)
+	} else {
+		title = m.styles.tool.Render(title)
+	}
+
+	lines := []string{title}
+	if m.showEvents {
+		for _, tool := range entry.tools {
+			nested := "  " + tool.text
+			if tool.toolError {
+				nested = m.styles.error.Render(nested)
+			} else {
+				nested = m.styles.muted.Render(nested)
+			}
+			lines = append(lines, nested)
+			if detail := renderToolDetails(tool, m.styles.muted, m.styles.error); detail != "" {
+				lines = append(lines, indentLines(detail, "    "))
+			}
 		}
 	}
 
@@ -1280,6 +1399,64 @@ func renderToolDetails(entry transcriptEntry, muted lipgloss.Style, errorStyle l
 		lines = append(lines, muted.Render("metadata: ")+metadata)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func indentLines(text string, prefix string) string {
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	for i := range lines {
+		lines[i] = prefix + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func isExplorationTool(name string) bool {
+	switch name {
+	case "read_file", "list_dir", "file_tree", "grep", "ripgrep", "git_status", "git_diff":
+		return true
+	default:
+		return false
+	}
+}
+
+func toolGroupText(tools []transcriptEntry, active bool, failed int) string {
+	count := len(tools)
+	if count == 0 {
+		return "Exploring workspace"
+	}
+	action := "Explored"
+	if active {
+		action = "Exploring"
+	}
+	if failed > 0 {
+		action = "Explored with errors"
+	}
+	return fmt.Sprintf("%s %d %s: %s", action, count, pluralize(count, "item", "items"),
+		compactToolNames(tools))
+}
+
+func compactToolNames(tools []transcriptEntry) string {
+	const maxNames = 4
+	names := make([]string, 0, min(len(tools), maxNames))
+	for i, tool := range tools {
+		if i >= maxNames {
+			break
+		}
+		names = append(names, tool.toolName)
+	}
+	if len(tools) > maxNames {
+		names = append(names, fmt.Sprintf("+%d more", len(tools)-maxNames))
+	}
+	return strings.Join(names, ", ")
+}
+
+func pluralize(count int, singular string, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 func toolRequestedText(name string) string {
