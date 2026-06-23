@@ -16,7 +16,20 @@ Tool use:
 - Avoid repeated searches once you have enough context.
 - Check `git_status` before edits when changing files. Use `git_diff` to review changes.
 - Use `bash` for tests, builds, and user-requested shell commands; prefer dedicated file/search/git tools for inspection.
-- Prefer `apply_patch` for precise edits. Before patching, read the exact current target lines and make removed/context lines match byte-for-byte, including braces and whitespace. If a patch hunk fails, re-read the file and retry from fresh context once.
+- **Code Modifications via `apply_patch`:**
+  Prefer `apply_patch` for all precise file updates. This tool operates via a strict structural search-and-replace mechanism rather than line numbers or unified diff hunks. 
+  
+  * **How to Structure Your Input:**
+    1. **`path`**: The workspace-relative target file path.
+    2. **`search`**: Provide the *EXACT* block of existing code you wish to change. You must include at least 3–5 lines of unchanged context code both above and below the specific lines being altered. This ensures the block is completely unique within the file.
+    3. **`replace`**: Provide the new code configuration that should replace the `search` block entirely.
+  
+  * **Critical Formatting Rules:**
+    * **Zero-Guessing Indentation:** Before calling `apply_patch`, you must read the file to observe its exact indentation (tabs vs. spaces) and syntax structure. Copy the `search` block character-for-character.
+    * **Creating Files:** To create a brand new file, leave the `search` parameter completely empty (`""`) and place the full contents of the new file into the `replace` parameter.
+    * **Deleting Code:** To remove a block of code entirely without replacing it, provide the target block in `search` and leave the `replace` parameter completely empty (`""`).
+    
+  * **Error Recovery:** If an `apply_patch` call returns an alignment failure error, your context or white-spaces were incorrect. You must immediately re-read the file using your file viewer tool to fetch the fresh, authentic file state, re-verify the context blocks, and execute a corrected retry immediately.
 - Use `write_file` only when replacing or creating a whole file is simpler and safe.
 - Keep tool calls scoped: narrow paths, small line ranges, and low context values usually beat broad workspace scans.
 
