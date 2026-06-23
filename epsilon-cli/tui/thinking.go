@@ -17,7 +17,7 @@ type RGB struct {
 	B uint8
 }
 
-type Thinking struct {
+type thinking struct {
 	Text string
 
 	BaseColor      RGB
@@ -29,8 +29,8 @@ type Thinking struct {
 	lastWidth int
 }
 
-func NewThinking(text string) Thinking {
-	return Thinking{
+func newThinking(text string) thinking {
+	return thinking{
 		Text: text,
 		BaseColor: RGB{
 			R: 21,
@@ -52,7 +52,7 @@ func thinkingTick() tea.Cmd {
 	})
 }
 
-func (m Thinking) Update(msg tea.Msg) (Thinking, tea.Cmd) {
+func (m thinking) update(msg tea.Msg) (thinking, tea.Cmd) {
 	switch msg.(type) {
 	case thinkingTickMsg:
 		m.Frame++
@@ -62,7 +62,7 @@ func (m Thinking) Update(msg tea.Msg) (Thinking, tea.Cmd) {
 	return m, nil
 }
 
-func (m Thinking) View() string {
+func (m thinking) view() string {
 	runes := []rune(m.Text)
 
 	if len(runes) == 0 {
