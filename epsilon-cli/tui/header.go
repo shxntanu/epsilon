@@ -74,7 +74,7 @@ func (m model) renderLogo() string {
 			Foreground(tuiInkStrong).
 			Bold(true).
 			Padding(0, 1).
-			Render("epsilon"),
+			Render("Epsilon"),
 	)
 }
 
@@ -120,7 +120,8 @@ func (m model) statusIcon(status string) string {
 		return "×"
 	case hasStatusPrefix(status, "model:") || hasStatusPrefix(status, "effort:"):
 		return "◆"
-	case hasStatusPrefix(status, "details:") || hasStatusPrefix(status, "density:"):
+	case hasStatusPrefix(status, "details:") || hasStatusPrefix(status, "density:") ||
+		hasStatusPrefix(status, "background:"):
 		return "◇"
 	case hasStatusPrefix(status, "mouse:"):
 		return "↕"

@@ -47,6 +47,10 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		m.resize()
 		m.status = "density:" + m.density.Label()
 		m.appendSlashMessage(result.Message)
+	case slash.ActionSetBackground:
+		m.showBackground = result.Bool
+		m.status = "background:" + onOff(m.showBackground)
+		m.appendSlashMessage(result.Message)
 	case slash.ActionPickModel:
 		return m.openModelPicker()
 	case slash.ActionPickSession:
@@ -136,6 +140,7 @@ func (m model) slashExecution() slash.Execution {
 			AwaitingApproval: m.permission != nil,
 			EventsVisible:    m.showEvents,
 			Density:          slashDensity(m.density),
+			Background:       m.showBackground,
 			MessageCount:     len(m.session.Messages()),
 			Model:            currentString(m.currentModel),
 			Effort:           currentString(m.currentEffort),

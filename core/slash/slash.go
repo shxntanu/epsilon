@@ -17,6 +17,7 @@ const (
 	ActionClearTranscript Action = "clear_transcript"
 	ActionSetEvents       Action = "set_events"
 	ActionSetDensity      Action = "set_density"
+	ActionSetBackground   Action = "set_background"
 	ActionPickModel       Action = "pick_model"
 	ActionSetModel        Action = "set_model"
 	ActionSetEffort       Action = "set_effort"
@@ -55,6 +56,7 @@ type State struct {
 	AwaitingApproval bool
 	EventsVisible    bool
 	Density          Density
+	Background       bool
 	MessageCount     int
 	Model            string
 	Effort           string
@@ -147,6 +149,23 @@ func NewDefaultRegistry() *Registry {
 				Action:  ActionSetDensity,
 				Density: value,
 				Message: "density " + string(value),
+			}, nil
+		},
+	})
+	registry.Register(Command{
+		Name:        "background",
+		Aliases:     []string{"bg"},
+		Usage:       "/background [on|off|toggle]",
+		Description: "show or hide message backgrounds",
+		Handler: func(_ context.Context, exec Execution) (Result, error) {
+			value, err := parseToggle(exec.Args, exec.State.Background, "background")
+			if err != nil {
+				return Result{}, err
+			}
+			return Result{
+				Action:  ActionSetBackground,
+				Bool:    value,
+				Message: "background " + onOff(value),
 			}, nil
 		},
 	})
@@ -360,6 +379,13 @@ func (r *Registry) Match(query string, limit int) []Match {
 		if matches[i].Score != matches[j].Score {
 			return matches[i].Score > matches[j].Score
 		}
+		if query == "" {
+			left := defaultCommandRank(matches[i].Command.Name)
+			right := defaultCommandRank(matches[j].Command.Name)
+			if left != right {
+				return left < right
+			}
+		}
 		return matches[i].Command.Name < matches[j].Command.Name
 	})
 
@@ -367,6 +393,17 @@ func (r *Registry) Match(query string, limit int) []Match {
 		return matches[:limit]
 	}
 	return matches
+}
+
+func defaultCommandRank(name string) int {
+	switch name {
+	case "clear":
+		return 0
+	case "background":
+		return 1
+	default:
+		return 100
+	}
 }
 
 func ParseInput(input string) Input {
@@ -504,6 +541,7 @@ func renderStatus(exec Execution) string {
 		"state: " + state,
 		"details: " + onOff(exec.State.EventsVisible),
 		"density: " + string(exec.State.Density),
+		"background: " + onOff(exec.State.Background),
 		"model: " + model,
 		"effort: " + effort,
 		fmt.Sprintf("messages: %d", exec.State.MessageCount),

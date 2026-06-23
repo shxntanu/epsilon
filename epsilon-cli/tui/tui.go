@@ -94,6 +94,7 @@ type eventStreamClosedMsg struct {
 	sessionID string
 }
 type stepDoneMsg struct {
+	id  uint64
 	err error
 }
 type modelListMsg struct {
@@ -125,6 +126,7 @@ type model struct {
 	slash           *slash.Registry
 	slashCursor     int
 	spinner         spinner.Model
+	thinking        Thinking
 	viewport        viewport.Model
 	contextView     func() contextwindow.Summary
 	modelInfo       func() (types.ModelInfo, bool)
@@ -149,6 +151,7 @@ type model struct {
 	showSpinner     bool
 	showEvents      bool
 	showContext     bool
+	showBackground  bool
 	mouseCapture    bool
 	density         densityMode
 	status          string
@@ -158,6 +161,9 @@ type model struct {
 	styles          styles
 	broker          *PermissionBroker
 	streaming       int
+	stepCancel      context.CancelFunc
+	stepSeq         uint64
+	activeStepID    uint64
 	quitArmed       bool
 }
 
@@ -360,34 +366,36 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	}
 
 	return model{
-		ctx:           ctx,
-		session:       sess,
-		subscription:  sub,
-		events:        eventStream,
-		composer:      newComposer(),
-		slash:         slashRegistry,
-		spinner:       spin,
-		viewport:      vp,
-		contextView:   contextSummary,
-		modelInfo:     selectedModel,
-		listModels:    listModels,
-		listSessions:  listSessions,
-		resumeSession: resumeSession,
-		currentModel:  currentModel,
-		currentEffort: currentEffort,
-		setModel:      setModel,
-		setEffort:     setEffort,
-		renameSession: renameSession,
-		mouseCapture:  false,
-		density:       densityComfortable,
-		status:        "ready",
-		sessionTitle:  "",
-		styles:        styles,
-		broker:        broker,
-		streaming:     -1,
-		entries:       entries,
-		dirty:         true,
-		followOutput:  true,
+		ctx:            ctx,
+		session:        sess,
+		subscription:   sub,
+		events:         eventStream,
+		composer:       newComposer(),
+		slash:          slashRegistry,
+		spinner:        spin,
+		thinking:       NewThinking("Thinking"),
+		viewport:       vp,
+		contextView:    contextSummary,
+		modelInfo:      selectedModel,
+		listModels:     listModels,
+		listSessions:   listSessions,
+		resumeSession:  resumeSession,
+		currentModel:   currentModel,
+		currentEffort:  currentEffort,
+		setModel:       setModel,
+		setEffort:      setEffort,
+		renameSession:  renameSession,
+		showBackground: true,
+		mouseCapture:   false,
+		density:        densityComfortable,
+		status:         "ready",
+		sessionTitle:   "",
+		styles:         styles,
+		broker:         broker,
+		streaming:      -1,
+		entries:        entries,
+		dirty:          true,
+		followOutput:   true,
 	}
 }
 
@@ -405,6 +413,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resize()
 	case tea.KeyPressMsg:
 		if m.permission != nil {
+			if msg.Keystroke() == "esc" && m.busy {
+				m.interruptModel()
+				m.syncViewport()
+				return m, nil
+			}
 			cmd := m.updatePermissionPrompt(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -445,6 +458,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "esc":
 			m.quitArmed = false
+			if m.busy {
+				m.interruptModel()
+			}
 		case "up", "ctrl+p":
 			m.quitArmed = false
 			if m.moveSlashSelection(-1) {
@@ -558,15 +574,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dirty = true
 			cmds = append(cmds, cmd)
 		}
+	case thinkingTickMsg:
+		if m.showSpinner {
+			var cmd tea.Cmd
+			m.thinking, cmd = m.thinking.Update(msg)
+			m.dirty = true
+			cmds = append(cmds, cmd)
+		}
 	case headerTickMsg:
 		m.headerAnimating = false
 		if m.shouldAnimateHeader() {
 			m.headerFrame++
 		}
 	case stepDoneMsg:
+		if msg.id != m.activeStepID {
+			break
+		}
+		m.stepCancel = nil
+		m.activeStepID = 0
 		m.busy = false
 		m.showSpinner = false
 		if msg.err != nil {
+			if errors.Is(msg.err, context.Canceled) {
+				m.status = "ready"
+				break
+			}
 			m.status = "error"
 			m.appendPlain(m.styles.error.Render("error: " + msg.err.Error()))
 		} else {
@@ -593,9 +625,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() tea.View {
 	headerText := m.renderHeaderText(m.width)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
-	help := m.styles.help.Render("ctrl+o details:" + onOff(m.showEvents) +
+	helpText := "ctrl+o details:" + onOff(m.showEvents) +
 		" | ctrl+x context:" + onOff(m.showContext) +
-		" | ctrl+g mouse:" + m.mouseLabel() + " | ctrl+c twice quit")
+		" | ctrl+g mouse:" + m.mouseLabel() + " | ctrl+c twice quit"
+	if m.busy {
+		helpText = "esc interrupt | " + helpText
+	}
+	help := m.styles.help.Render(helpText)
 	contextLine := m.renderContextWidget()
 	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
 
@@ -749,21 +785,26 @@ func (m *model) submit() tea.Cmd {
 	m.followOutput = true
 	m.status = "thinking"
 	m.dirty = true
+	stepCtx, cancel := context.WithCancel(m.ctx)
+	m.stepCancel = cancel
+	m.stepSeq++
+	stepID := m.stepSeq
+	m.activeStepID = stepID
 
 	sessionStep := func() tea.Msg {
-		if err := m.session.Send(m.ctx, types.UserMessage(text)); err != nil {
-			return stepDoneMsg{err: err}
+		if err := m.session.Send(stepCtx, types.UserMessage(text)); err != nil {
+			return stepDoneMsg{id: stepID, err: err}
 		}
 		if shouldDefaultTitle && defaultTitle != "" && m.renameSession != nil {
-			_, _ = m.renameSession(m.ctx, m.session.ID(), defaultTitle)
+			_, _ = m.renameSession(stepCtx, m.session.ID(), defaultTitle)
 		}
-		if err := m.session.Step(m.ctx); err != nil {
-			return stepDoneMsg{err: err}
+		if err := m.session.Step(stepCtx); err != nil {
+			return stepDoneMsg{id: stepID, err: err}
 		}
-		return stepDoneMsg{}
+		return stepDoneMsg{id: stepID}
 	}
 
-	return tea.Batch(m.spinner.Tick, sessionStep)
+	return tea.Batch(m.spinner.Tick, thinkingTick(), sessionStep)
 }
 
 func (m model) waitForEvent() tea.Cmd {
@@ -1062,6 +1103,34 @@ func (m model) hasActiveTools() bool {
 	return false
 }
 
+func (m *model) clearActiveTools() {
+	for i := range m.entries {
+		switch m.entries[i].kind {
+		case transcriptTool:
+			clearActiveToolEntry(&m.entries[i])
+		case transcriptToolGroup:
+			for j := range m.entries[i].tools {
+				clearActiveToolEntry(&m.entries[i].tools[j])
+			}
+			m.refreshToolGroup(i)
+		}
+	}
+}
+
+func clearActiveToolEntry(entry *transcriptEntry) {
+	if !entry.toolActive {
+		return
+	}
+	entry.toolActive = false
+	name := strings.TrimSpace(entry.toolName)
+	if name == "" {
+		name = strings.TrimSpace(entry.text)
+	}
+	if name != "" {
+		entry.text = "Interrupted " + name
+	}
+}
+
 func (m *model) appendDiff(diff string) {
 	m.entries = append(m.entries, transcriptEntry{
 		kind: transcriptDiff,
@@ -1154,6 +1223,22 @@ func (m *model) resolvePermission(decision types.PermissionDecision, reason stri
 	m.dirty = true
 }
 
+func (m *model) interruptModel() {
+	if m.stepCancel != nil {
+		m.stepCancel()
+	}
+	m.stepCancel = nil
+	m.activeStepID = 0
+	m.busy = false
+	m.showSpinner = false
+	m.permission = nil
+	m.status = "ready"
+	m.clearActiveTools()
+	m.appendStatus("Interrupted")
+	m.resize()
+	m.dirty = true
+}
+
 func (m *model) confirmQuit() tea.Cmd {
 	if m.quitArmed {
 		return quitCmd()
@@ -1228,7 +1313,7 @@ func (m model) renderAgentMessage(text string) string {
 }
 
 func (m model) renderSpinnerMessage() string {
-	responding := m.spinner.View() + " " + m.styles.muted.Render("Thinking")
+	responding := m.spinner.View() + " " + m.thinking.View()
 	return m.harnessMessage().RenderSpinner(responding)
 }
 
@@ -1242,10 +1327,15 @@ func (m model) renderUserMessage(text string) string {
 		return m.styles.userLabel.Render("You") + " " + m.styles.muted.Render("-") + " " + message
 	}
 
+	block := m.styles.userBlock
+	if !m.showBackground {
+		block = block.Background(tuiBackground)
+	}
+
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.styles.userLabel.Render("You"),
-		m.styles.userBlock.Width(m.messageWidth()).Render(message),
+		block.Width(m.messageWidth()).Render(message),
 	)
 }
 
@@ -1368,12 +1458,14 @@ func (m model) harnessMessageWidth() int {
 }
 
 func (m model) harnessMessage() harnessMessage {
-	return newHarnessMessage(
+	message := newHarnessMessage(
 		m.harnessMessageWidth(),
 		m.density,
 		m.styles.agentLabel,
 		m.styles.muted,
 	)
+	message.showBackground = m.showBackground
+	return message
 }
 
 func (m model) entrySeparator() string {

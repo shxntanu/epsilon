@@ -7,12 +7,13 @@ import (
 )
 
 type harnessMessage struct {
-	width      int
-	density    densityMode
-	label      lipgloss.Style
-	muted      lipgloss.Style
-	block      lipgloss.Style
-	agentBlock lipgloss.Style
+	width          int
+	density        densityMode
+	label          lipgloss.Style
+	muted          lipgloss.Style
+	block          lipgloss.Style
+	agentBlock     lipgloss.Style
+	showBackground bool
 }
 
 func newHarnessMessage(width int, density densityMode, label lipgloss.Style,
@@ -25,6 +26,7 @@ func newHarnessMessage(width int, density densityMode, label lipgloss.Style,
 		block: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Foreground(tuiInk),
+		showBackground: true,
 		agentBlock: lipgloss.NewStyle().
 			Background(tuiSurface).
 			Foreground(tuiInk).
@@ -66,6 +68,13 @@ func (h harnessMessage) renderLabeled(label string, text string) string {
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		renderedLabel,
-		h.agentBlock.Width(h.width).Render(text),
+		h.messageBlock().Width(h.width).Render(text),
 	)
+}
+
+func (h harnessMessage) messageBlock() lipgloss.Style {
+	if h.showBackground {
+		return h.agentBlock
+	}
+	return h.agentBlock.Background(tuiBackground)
 }
