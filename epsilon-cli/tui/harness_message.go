@@ -26,7 +26,7 @@ func newHarnessMessage(width int, density densityMode, label lipgloss.Style,
 		block: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Foreground(tuiInk),
-		showBackground: true,
+		showBackground: false,
 		agentBlock: lipgloss.NewStyle().
 			Background(tuiSurface).
 			Foreground(tuiInk).

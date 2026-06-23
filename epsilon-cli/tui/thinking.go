@@ -33,14 +33,14 @@ func NewThinking(text string) Thinking {
 	return Thinking{
 		Text: text,
 		BaseColor: RGB{
-			R: 110,
-			G: 110,
-			B: 115,
+			R: 21,
+			G: 151,
+			B: 187,
 		},
 		HighlightColor: RGB{
-			R: 245,
-			G: 245,
-			B: 250,
+			R: 143,
+			G: 214,
+			B: 225,
 		},
 		Speed: 8,
 	}

@@ -8,28 +8,28 @@ var (
 	tuiMuted      = lipgloss.Color("246")
 	tuiSubtle     = lipgloss.Color("244")
 	tuiFaint      = lipgloss.Color("240")
-	tuiLine       = lipgloss.Color("238")
-	tuiLineStrong = lipgloss.Color("241")
-	tuiSurface    = lipgloss.Color("234")
-	tuiSurface2   = lipgloss.Color("235")
-	tuiSurface3   = lipgloss.Color("237")
-	tuiSelected   = lipgloss.Color("238")
+	tuiLine       = lipgloss.Color("#150E56")
+	tuiLineStrong = lipgloss.Color("#1597BB")
+	tuiSurface    = lipgloss.Color("#07041A")
+	tuiSurface2   = lipgloss.Color("#0A1026")
+	tuiSurface3   = lipgloss.Color("#081D24")
+	tuiSelected   = lipgloss.Color("#150E56")
 
-	tuiAccentAgent   = lipgloss.Color("146")
-	tuiAccentUser    = lipgloss.Color("109")
-	tuiAccentInfo    = lipgloss.Color("117")
-	tuiAccentModel   = lipgloss.Color("183")
-	tuiAccentCommand = lipgloss.Color("147")
-	tuiAccentTool    = lipgloss.Color("178")
-	tuiAccentOK      = lipgloss.Color("120")
-	tuiAccentWarn    = lipgloss.Color("220")
-	tuiAccentDanger  = lipgloss.Color("203")
+	tuiAccentAgent   = lipgloss.Color("#1597BB")
+	tuiAccentUser    = lipgloss.Color("#7B113A")
+	tuiAccentInfo    = lipgloss.Color("#8FD6E1")
+	tuiAccentModel   = lipgloss.Color("#150E56")
+	tuiAccentCommand = lipgloss.Color("#8FD6E1")
+	tuiAccentTool    = lipgloss.Color("#1597BB")
+	tuiAccentOK      = lipgloss.Color("#8FD6E1")
+	tuiAccentWarn    = lipgloss.Color("#7B113A")
+	tuiAccentDanger  = lipgloss.Color("#7B113A")
 
-	tuiStatusReady    = lipgloss.Color("35")
-	tuiStatusThinking = lipgloss.Color("57")
-	tuiStatusWorking  = lipgloss.Color("24")
-	tuiStatusWarn     = lipgloss.Color("58")
-	tuiStatusDanger   = lipgloss.Color("52")
+	tuiStatusReady    = lipgloss.Color("#1597BB")
+	tuiStatusThinking = lipgloss.Color("#150E56")
+	tuiStatusWorking  = lipgloss.Color("#1597BB")
+	tuiStatusWarn     = lipgloss.Color("#7B113A")
+	tuiStatusDanger   = lipgloss.Color("#7B113A")
 )
 
 func statusBadgeStyle(status string) lipgloss.Style {
@@ -57,7 +57,7 @@ func statusBadgeStyle(status string) lipgloss.Style {
 		fg = tuiInkStrong
 	case hasStatusPrefix(status, "model:") || hasStatusPrefix(status, "effort:"):
 		bg = tuiAccentModel
-		fg = lipgloss.Color("234")
+		fg = tuiInkStrong
 		bold = true
 	case hasStatusPrefix(status, "details:") || hasStatusPrefix(status, "density:") ||
 		hasStatusPrefix(status, "background:"):
