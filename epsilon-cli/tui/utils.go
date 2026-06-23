@@ -19,6 +19,14 @@ func renderBashToolTitle(entry transcriptEntry) string {
 	return "Ran " + command
 }
 
+func renderBashToolCommand(entry transcriptEntry) string {
+	command := strings.TrimSpace(entry.toolMeta["command"])
+	if command == "" {
+		command = bashCommandFromInput(entry.toolInput)
+	}
+	return command
+}
+
 func bashCommandFromInput(input string) string {
 	var data struct {
 		Command string `json:"command"`
@@ -57,6 +65,33 @@ func renderExplorationToolTitle(entry transcriptEntry) string {
 		return "Reading " + name
 	}
 	return "Read " + name
+}
+
+func renderToolSummary(entry transcriptEntry) string {
+	result := strings.TrimSpace(entry.toolResult)
+	if result == "" {
+		if entry.toolActive {
+			return "running"
+		}
+		return ""
+	}
+	lines := strings.Split(result, "\n")
+	count := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	switch {
+	case entry.toolError:
+		return "failed"
+	case count == 0:
+		return ""
+	case count == 1:
+		return "1 line"
+	default:
+		return fmt.Sprintf("%d lines", count)
+	}
 }
 
 func explorationDisplayName(entry transcriptEntry) string {

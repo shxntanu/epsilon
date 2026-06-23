@@ -34,6 +34,8 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 	case slash.ActionClearTranscript:
 		m.entries = nil
 		m.streaming = -1
+		m.scrollPrinted = 0
+		m.scrollPrinting = false
 		m.status = "ready"
 		if result.Message != "" {
 			m.appendPlain(m.styles.muted.Render(result.Message))

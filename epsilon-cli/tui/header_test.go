@@ -24,7 +24,7 @@ func TestRenderHeaderTextTruncatesLongSession(t *testing.T) {
 	}
 
 	header := plainANSI(m.renderHeaderText(54))
-	if !strings.Contains(header, "epsilon") {
+	if !strings.Contains(header, "Epsilon") {
 		t.Fatalf("header missing logo: %q", header)
 	}
 	if !strings.Contains(header, "thinking") {

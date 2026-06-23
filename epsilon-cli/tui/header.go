@@ -123,7 +123,7 @@ func (m model) statusIcon(status string) string {
 	case hasStatusPrefix(status, "details:") || hasStatusPrefix(status, "density:") ||
 		hasStatusPrefix(status, "background:"):
 		return "◇"
-	case hasStatusPrefix(status, "mouse:"):
+	case hasStatusPrefix(status, "mouse:") || hasStatusPrefix(status, "view:"):
 		return "↕"
 	default:
 		return "•"

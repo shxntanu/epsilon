@@ -113,6 +113,11 @@ type resumeSessionMsg struct {
 	sub       *events.Subscription
 	err       error
 }
+type terminalScrollbackPrintedMsg struct {
+	printed    int
+	headerOut  bool
+	replayDone bool
+}
 
 const bottomGutterHeight = 1
 const defaultSessionTitleMaxRunes = 48
@@ -126,7 +131,7 @@ type model struct {
 	slash           *slash.Registry
 	slashCursor     int
 	spinner         spinner.Model
-	thinking        Thinking
+	thinking        thinking
 	viewport        viewport.Model
 	contextView     func() contextwindow.Summary
 	modelInfo       func() (types.ModelInfo, bool)
@@ -158,6 +163,11 @@ type model struct {
 	sessionTitle    string
 	headerFrame     int
 	headerAnimating bool
+	scrollPrinted   int
+	scrollHeader    string
+	scrollHeaderOut bool
+	scrollReplay    bool
+	scrollPrinting  bool
 	styles          styles
 	broker          *PermissionBroker
 	streaming       int
@@ -374,7 +384,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		composer:       newComposer(),
 		slash:          slashRegistry,
 		spinner:        spin,
-		thinking:       NewThinking("Thinking"),
+		thinking:       newThinking("Thinking"),
 		viewport:       vp,
 		contextView:    contextSummary,
 		modelInfo:      selectedModel,
@@ -386,8 +396,8 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		setModel:       setModel,
 		setEffort:      setEffort,
 		renameSession:  renameSession,
-		showBackground: true,
-		mouseCapture:   false,
+		showBackground: false,
+		mouseCapture:   true,
 		density:        densityComfortable,
 		status:         "ready",
 		sessionTitle:   "",
@@ -397,6 +407,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		entries:        entries,
 		dirty:          true,
 		followOutput:   true,
+		scrollReplay:   true,
 	}
 }
 
@@ -427,6 +438,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 			m.syncViewport()
+			if cmd := m.terminalScrollbackCmd(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return m, tea.Batch(cmds...)
 		}
 		if m.modelPicker != nil {
@@ -438,6 +452,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 			m.syncViewport()
+			if cmd := m.terminalScrollbackCmd(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return m, tea.Batch(cmds...)
 		}
 		if m.sessionPicker != nil {
@@ -449,6 +466,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 			m.syncViewport()
+			if cmd := m.terminalScrollbackCmd(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -508,6 +528,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+o":
 			m.quitArmed = false
 			m.showEvents = !m.showEvents
+			m.status = "details:" + onOff(m.showEvents)
 			m.dirty = true
 		case "ctrl+x":
 			m.quitArmed = false
@@ -517,9 +538,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitArmed = false
 			m.mouseCapture = !m.mouseCapture
 			if m.mouseCapture {
-				m.status = "mouse:scroll"
+				m.status = "view:terminal"
+				m.prepareTerminalScroll()
 			} else {
-				m.status = "mouse:select"
+				m.status = "view:app"
 			}
 			m.dirty = true
 		case "ctrl+t":
@@ -568,6 +590,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.applyResumeSession(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case terminalScrollbackPrintedMsg:
+		m.scrollPrinted = msg.printed
+		m.scrollHeaderOut = msg.headerOut
+		m.scrollReplay = !msg.replayDone
+		m.scrollPrinting = false
 	case spinner.TickMsg:
 		if m.showSpinner || m.hasActiveTools() {
 			var cmd tea.Cmd
@@ -578,7 +605,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case thinkingTickMsg:
 		if m.showSpinner {
 			var cmd tea.Cmd
-			m.thinking, cmd = m.thinking.Update(msg)
+			m.thinking, cmd = m.thinking.update(msg)
 			m.dirty = true
 			cmds = append(cmds, cmd)
 		}
@@ -620,15 +647,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 	m.syncViewport()
+	if cmd := m.terminalScrollbackCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return m, tea.Batch(cmds...)
 }
 
 func (m model) View() tea.View {
+	if m.terminalScrollMode() {
+		return m.terminalScrollView()
+	}
+
 	headerText := m.renderHeaderText(m.width)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	helpText := "ctrl+o details:" + onOff(m.showEvents) +
 		" | ctrl+x context:" + onOff(m.showContext) +
-		" | ctrl+g mouse:" + m.mouseLabel() + " | ctrl+c twice quit"
+		" | ctrl+g view:" + m.viewModeLabel() + " | ctrl+c twice quit"
 	if m.busy {
 		helpText = "esc interrupt | " + helpText
 	}
@@ -670,6 +704,47 @@ func (m model) View() tea.View {
 	return view
 }
 
+func (m model) terminalScrollMode() bool {
+	return m.mouseCapture
+}
+
+func (m model) terminalScrollView() tea.View {
+	parts := make([]string, 0, 6)
+	if m.showEvents {
+		if detail := m.renderTerminalDetailTranscript(); detail != "" {
+			parts = append(parts, detail)
+		}
+	} else if replay := m.renderTerminalReplayTranscript(); replay != "" {
+		parts = append(parts, replay)
+	} else if live := m.renderTerminalLiveTranscript(); live != "" {
+		parts = append(parts, live)
+	}
+	if m.permission != nil {
+		parts = append(parts, m.permission.View())
+	}
+	if selector, ok := m.renderSlashSelector(); ok {
+		parts = append(parts, selector)
+	}
+	if picker, ok := m.renderModelPicker(); ok {
+		parts = append(parts, picker)
+	}
+	if picker, ok := m.renderSessionPicker(); ok {
+		parts = append(parts, picker)
+	}
+	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.headerFrame))
+	if m.busy {
+		parts = append(parts, m.styles.help.Render("esc interrupt | ctrl+g app view | ctrl+c twice quit"))
+	} else {
+		parts = append(parts, m.styles.help.Render("ctrl+g app view | ctrl+c twice quit"))
+	}
+
+	var view tea.View
+	view.SetContent(lipgloss.JoinVertical(lipgloss.Left, parts...))
+	view.BackgroundColor = tuiBackgroundColor
+	view.MouseMode = tea.MouseModeNone
+	return view
+}
+
 func (m model) currentSessionLabel() string {
 	if title := strings.TrimSpace(m.sessionTitle); title != "" {
 		return title
@@ -678,17 +753,17 @@ func (m model) currentSessionLabel() string {
 }
 
 func (m model) currentMouseMode() tea.MouseMode {
-	if m.mouseCapture {
+	if m.mouseCapture && !m.terminalScrollMode() {
 		return tea.MouseModeCellMotion
 	}
 	return tea.MouseModeNone
 }
 
-func (m model) mouseLabel() string {
-	if m.mouseCapture {
-		return "scroll"
+func (m model) viewModeLabel() string {
+	if m.terminalScrollMode() {
+		return "terminal"
 	}
-	return "select"
+	return "app"
 }
 
 func (m *model) resize() {
@@ -1264,6 +1339,152 @@ func (m *model) syncViewport() {
 	m.dirty = false
 }
 
+func (m *model) prepareTerminalScroll() {
+	m.scrollPrinted = 0
+	m.scrollHeader = m.renderHeaderText(m.width)
+	m.scrollHeaderOut = false
+	m.scrollReplay = true
+	m.scrollPrinting = false
+}
+
+func (m *model) terminalScrollbackCmd() tea.Cmd {
+	if !m.terminalScrollMode() || m.scrollPrinting {
+		return nil
+	}
+	if strings.TrimSpace(m.scrollHeader) == "" {
+		m.scrollHeader = m.renderHeaderText(m.width)
+	}
+
+	printed := m.scrollPrinted
+	if printed > len(m.entries) {
+		printed = len(m.entries)
+	}
+
+	headerOut := m.scrollHeaderOut
+	lines := make([]string, 0, max(0, len(m.entries)-printed)+1)
+	if !headerOut {
+		lines = append(lines, m.scrollHeader)
+		headerOut = true
+	}
+	for printed < len(m.entries) {
+		if !m.isTerminalPrintableEntry(printed) {
+			break
+		}
+		line, ok := m.renderScrollbackTranscriptEntry(m.entries[printed])
+		printed++
+		if ok {
+			lines = append(lines, line)
+		}
+	}
+	replayDone := printed >= len(m.entries)
+	if len(lines) == 0 {
+		if replayDone {
+			m.scrollReplay = false
+		}
+		return nil
+	}
+	m.scrollPrinting = true
+
+	return tea.Sequence(
+		tea.Println(strings.Join(lines, m.entrySeparator())),
+		func() tea.Msg {
+			return terminalScrollbackPrintedMsg{
+				printed:    printed,
+				headerOut:  headerOut,
+				replayDone: replayDone,
+			}
+		},
+	)
+}
+
+func (m model) renderTerminalReplayTranscript() string {
+	if !m.scrollReplay {
+		return ""
+	}
+	lines := make([]string, 0, max(0, len(m.entries)-m.scrollPrinted))
+	for index := m.scrollPrinted; index < len(m.entries); index++ {
+		if !m.isTerminalPrintableEntry(index) {
+			break
+		}
+		line, ok := m.renderScrollbackTranscriptEntry(m.entries[index])
+		if ok {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, m.entrySeparator())
+}
+
+func (m model) renderTerminalDetailTranscript() string {
+	if len(m.entries) == 0 {
+		return ""
+	}
+	return m.styles.toolBlock.Render(m.renderTranscript())
+}
+
+func (m model) renderScrollbackTranscriptEntry(entry transcriptEntry) (string, bool) {
+	collapsed := m
+	collapsed.showEvents = false
+	return collapsed.renderTranscriptEntry(entry)
+}
+
+func (m model) isTerminalPrintableEntry(index int) bool {
+	if index < 0 || index >= len(m.entries) {
+		return false
+	}
+	entry := m.entries[index]
+	switch entry.kind {
+	case transcriptAgent:
+		return index != m.streaming
+	case transcriptTool:
+		return !entry.toolActive && (entry.toolResult != "" || entry.toolError)
+	case transcriptToolGroup:
+		if entry.toolActive {
+			return false
+		}
+		for _, tool := range entry.tools {
+			if tool.toolActive || (tool.toolResult == "" && !tool.toolError) {
+				return false
+			}
+		}
+		return true
+	default:
+		return true
+	}
+}
+
+func (m model) renderTerminalLiveTranscript() string {
+	lines := make([]string, 0, 2)
+	if m.streaming >= 0 && m.streaming < len(m.entries) {
+		if line, ok := m.renderTranscriptEntry(m.entries[m.streaming]); ok {
+			lines = append(lines, line)
+		}
+	}
+	if active := m.renderActiveToolEntries(); active != "" {
+		lines = append(lines, active)
+	}
+	if m.showSpinner {
+		lines = append(lines, m.renderSpinnerMessage())
+	}
+	return strings.Join(lines, m.entrySeparator())
+}
+
+func (m model) renderActiveToolEntries() string {
+	lines := make([]string, 0, 2)
+	for _, entry := range m.entries {
+		switch entry.kind {
+		case transcriptTool:
+			if entry.toolActive {
+				lines = append(lines, m.renderToolEntry(entry))
+			}
+		case transcriptToolGroup:
+			if entry.toolActive {
+				lines = append(lines, m.renderToolGroupEntry(entry))
+			}
+		}
+	}
+	return strings.Join(lines, m.entrySeparator())
+}
+
 func (m model) renderTranscript() string {
 	lines := make([]string, 0, len(m.entries))
 	for _, entry := range m.entries {
@@ -1314,7 +1535,7 @@ func (m model) renderAgentMessage(text string) string {
 }
 
 func (m model) renderSpinnerMessage() string {
-	responding := m.spinner.View() + " " + m.thinking.View()
+	responding := m.spinner.View() + " " + m.thinking.view()
 	return m.harnessMessage().RenderSpinner(responding)
 }
 
@@ -1354,100 +1575,6 @@ func (m model) renderStatusEntry(entry transcriptEntry) string {
 		return line
 	}
 	return m.styles.statusLine.Width(m.messageWidth()).Render(line)
-}
-
-func (m model) renderToolEntry(entry transcriptEntry) string {
-	title := renderToolTitle(entry)
-	if entry.toolActive {
-		title = m.spinner.View() + " " + title
-	}
-	if entry.toolError {
-		title = m.styles.error.Render(title)
-	} else if isExplorationTool(entry.toolName) {
-		title = m.styles.tool.Render(title)
-	} else {
-		title = m.styles.muted.Render(title)
-	}
-
-	lines := []string{title}
-	if m.showEvents {
-		if detail := renderToolDetails(entry, m.styles.muted, m.styles.error); detail != "" {
-			lines = append(lines, indentLines(detail, "  "))
-		}
-	}
-
-	body := strings.Join(lines, "\n")
-	return m.styles.toolBlock.Render(body)
-}
-
-func (m model) renderToolGroupEntry(entry transcriptEntry) string {
-	title := renderExplorationTitle(entry)
-	if m.showEvents {
-		title = entry.text
-	}
-	if entry.toolActive {
-		title = m.spinner.View() + " " + title
-	}
-	if entry.toolError {
-		title = m.styles.error.Render(title)
-	} else {
-		title = m.styles.tool.Render(title)
-	}
-
-	lines := []string{title}
-	if m.showEvents {
-		for _, tool := range entry.tools {
-			nested := "  " + renderExplorationToolTitle(tool)
-			if tool.toolError {
-				nested = m.styles.error.Render(nested)
-			} else {
-				nested = m.styles.muted.Render(nested)
-			}
-			lines = append(lines, nested)
-			if detail := renderToolDetails(tool, m.styles.muted, m.styles.error); detail != "" {
-				lines = append(lines, indentLines(detail, "    "))
-			}
-		}
-	}
-
-	body := strings.Join(lines, "\n")
-	return m.styles.toolBlock.Render(body)
-}
-
-func (m model) renderDiff(diff string) string {
-	body := m.renderDiffBody(diff)
-	if m.density == densityCompact {
-		return m.styles.tool.Render("Changes") + "\n" + body
-	}
-
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.styles.tool.Render("Changes"),
-		m.styles.diffBlock.Width(m.messageWidth()).Render(body),
-	)
-}
-
-func (m model) renderDiffBody(diff string) string {
-	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
-	rendered := make([]string, 0, len(lines))
-	for _, line := range lines {
-		switch {
-		case strings.HasPrefix(line, "*** "):
-			rendered = append(rendered, m.styles.diffHeader.Render(line))
-		case strings.HasPrefix(line, "@@"):
-			rendered = append(rendered, m.styles.diffMeta.Render(line))
-		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
-			rendered = append(rendered, m.styles.diffHeader.Render(line))
-		case strings.HasPrefix(line, "+"):
-			rendered = append(rendered, m.styles.diffAdd.Render(line))
-		case strings.HasPrefix(line, "-"):
-			rendered = append(rendered, m.styles.diffRemove.Render(line))
-		default:
-			rendered = append(rendered, m.styles.muted.Render(line))
-		}
-	}
-
-	return strings.Join(rendered, "\n")
 }
 
 func (m model) messageWidth() int {
@@ -1493,7 +1620,7 @@ func formatMetadata(metadata map[string]string) string {
 	}
 	display := make(map[string]string, len(metadata))
 	for key, value := range metadata {
-		if key == "diff" {
+		if key == "diff" || key == "command" {
 			continue
 		}
 		display[key] = value
@@ -1506,42 +1633,4 @@ func formatMetadata(metadata map[string]string) string {
 		return ""
 	}
 	return string(data)
-}
-
-func renderToolDetails(entry transcriptEntry, muted lipgloss.Style, errorStyle lipgloss.Style) string {
-	lines := make([]string, 0, 4)
-	if entry.toolInput != "" {
-		lines = append(lines, muted.Render("input: ")+entry.toolInput)
-	}
-	if entry.toolResult != "" {
-		label := muted.Render("result: ")
-		if entry.toolError {
-			label = errorStyle.Render("result: ")
-		}
-		lines = append(lines, label+entry.toolResult)
-	}
-	if metadata := formatMetadata(entry.toolMeta); metadata != "" {
-		lines = append(lines, muted.Render("metadata: ")+metadata)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func renderToolTitle(entry transcriptEntry) string {
-	if entry.kind == transcriptToolGroup {
-		return entry.text
-	}
-	name := strings.TrimSpace(entry.toolName)
-	if name == "" {
-		return entry.text
-	}
-	if entry.toolError {
-		return "failed " + name
-	}
-	if entry.toolActive {
-		return "using " + name
-	}
-	if name == "bash" {
-		return renderBashToolTitle(entry)
-	}
-	return name
 }

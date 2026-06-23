@@ -129,15 +129,45 @@ func TestRenderToolEntryHidesDetailsUntilExpanded(t *testing.T) {
 	if strings.Contains(collapsed, "ctrl+o") {
 		t.Fatalf("collapsed tool entry should not render persistent hint:\n%s", collapsed)
 	}
-	if strings.Contains(collapsed, "Used read_file") || !strings.Contains(collapsed, "read_file") {
-		t.Fatalf("collapsed tool entry = %q, want compact tool name", collapsed)
+	collapsedPlain := plainANSI(collapsed)
+	if strings.Contains(collapsedPlain, "Used read_file") || !strings.Contains(collapsedPlain, "Read README.md") ||
+		!strings.Contains(collapsedPlain, "└  1 line") {
+		t.Fatalf("collapsed tool entry = %q, want pretty action and summary", collapsedPlain)
 	}
 
 	m.showEvents = true
 	expanded := m.renderToolEntry(entry)
-	for _, want := range []string{"read_file", `{"path":"README.md"}`, "project docs"} {
+	for _, want := range []string{"Read README.md", `{"path":"README.md"}`, "project docs"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded tool entry missing %q:\n%s", want, expanded)
+		}
+	}
+}
+
+func TestRenderBashToolEntryUsesCodexLikeDetailTreatment(t *testing.T) {
+	m := model{
+		width:      80,
+		density:    densityComfortable,
+		showEvents: true,
+		styles: styles{
+			tool:      lipgloss.NewStyle(),
+			error:     lipgloss.NewStyle(),
+			muted:     lipgloss.NewStyle(),
+			toolBlock: lipgloss.NewStyle(),
+		},
+	}
+	entry := transcriptEntry{
+		kind:       transcriptTool,
+		text:       "Used bash",
+		toolName:   "bash",
+		toolInput:  `{"command":"git diff --stat"}`,
+		toolResult: "epsilon-cli/tui/tui.go | 12 +++++\n1 file changed",
+	}
+
+	rendered := plainANSI(m.renderToolEntry(entry))
+	for _, want := range []string{"• Ran git diff --stat", "  $ git diff --stat", "result", "1 file changed"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("bash tool entry missing %q:\n%s", want, rendered)
 		}
 	}
 }
@@ -188,6 +218,160 @@ func TestRenderToolGroupHidesNestedDetailsUntilExpanded(t *testing.T) {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded tool group missing %q:\n%s", want, expanded)
 		}
+	}
+}
+
+func TestTerminalScrollbackWaitsForLiveEntries(t *testing.T) {
+	m := model{
+		width:        80,
+		mouseCapture: true,
+		sessionTitle: "test session",
+		streaming:    1,
+		entries: []transcriptEntry{
+			{kind: transcriptUser, text: "hello"},
+			{kind: transcriptAgent, text: "partial"},
+		},
+	}
+	m.prepareTerminalScroll()
+
+	if cmd := m.terminalScrollbackCmd(); cmd == nil {
+		t.Fatal("first scrollback command = nil, want header and user message")
+	}
+	if !m.scrollPrinting {
+		t.Fatal("scrollPrinting = false, want terminal print queued")
+	}
+	if m.scrollPrinted != 0 {
+		t.Fatalf("scrollPrinted = %d before ack, want unchanged", m.scrollPrinted)
+	}
+
+	updated, _ := m.Update(terminalScrollbackPrintedMsg{printed: 1, headerOut: true})
+	m = updated.(model)
+	if !m.scrollHeaderOut {
+		t.Fatal("scroll header was not marked emitted")
+	}
+	if cmd := m.terminalScrollbackCmd(); cmd != nil {
+		t.Fatal("second scrollback command emitted live streaming entry")
+	}
+
+	m.streaming = -1
+	if cmd := m.terminalScrollbackCmd(); cmd == nil {
+		t.Fatal("completed agent message did not emit")
+	}
+	updated, _ = m.Update(terminalScrollbackPrintedMsg{printed: 2, headerOut: true, replayDone: true})
+	m = updated.(model)
+	if m.scrollPrinted != 2 {
+		t.Fatalf("scrollPrinted = %d, want all entries emitted", m.scrollPrinted)
+	}
+}
+
+func TestTerminalViewShowsPendingReplayTranscript(t *testing.T) {
+	composer := newComposer()
+	composer.SetWidth(80)
+	m := model{
+		width:         80,
+		composer:      composer,
+		mouseCapture:  true,
+		sessionTitle:  "test session",
+		streaming:     -1,
+		scrollReplay:  true,
+		scrollPrinted: 0,
+		entries: []transcriptEntry{
+			{kind: transcriptUser, text: "hello"},
+			{kind: transcriptAgent, text: "hi there"},
+		},
+	}
+
+	view := plainANSI(m.terminalScrollView().Content)
+	for _, want := range []string{"hello", "hi there", "message"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("terminal replay view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestDetailsDoNotReplayTerminalScrollback(t *testing.T) {
+	m := model{
+		width:           80,
+		composer:        newComposer(),
+		mouseCapture:    true,
+		sessionTitle:    "test session",
+		streaming:       -1,
+		scrollPrinted:   2,
+		scrollHeader:    "header",
+		scrollHeaderOut: true,
+		scrollReplay:    false,
+		entries: []transcriptEntry{
+			{kind: transcriptUser, text: "hello"},
+			{kind: transcriptTool, text: "Used read_file", toolName: "read_file", toolResult: "body"},
+		},
+	}
+
+	m.applySlashResult(slash.Result{
+		Action:  slash.ActionSetEvents,
+		Bool:    true,
+		Message: "details on",
+	}, nil)
+
+	if !m.showEvents {
+		t.Fatal("showEvents = false, want details enabled")
+	}
+	if m.scrollPrinted != 2 {
+		t.Fatalf("scrollPrinted = %d, want scrollback cursor preserved", m.scrollPrinted)
+	}
+	if !m.scrollHeaderOut {
+		t.Fatal("scrollHeaderOut = false, want header state preserved")
+	}
+	if m.scrollReplay {
+		t.Fatal("scrollReplay = true, want no terminal replay for details")
+	}
+}
+
+func TestTerminalDetailViewExpandsTranscriptInBubbleTeaOnly(t *testing.T) {
+	composer := newComposer()
+	composer.SetWidth(80)
+	m := model{
+		width:        80,
+		composer:     composer,
+		mouseCapture: true,
+		sessionTitle: "test session",
+		streaming:    -1,
+		showEvents:   true,
+		styles: styles{
+			tool:       lipgloss.NewStyle(),
+			error:      lipgloss.NewStyle(),
+			muted:      lipgloss.NewStyle(),
+			toolBlock:  lipgloss.NewStyle(),
+			userLabel:  lipgloss.NewStyle(),
+			userBlock:  lipgloss.NewStyle(),
+			statusLine: lipgloss.NewStyle(),
+		},
+		entries: []transcriptEntry{
+			{kind: transcriptUser, text: "hello"},
+			{
+				kind:       transcriptTool,
+				text:       "Used read_file",
+				toolName:   "read_file",
+				toolInput:  `{"path":"README.md"}`,
+				toolResult: "project docs",
+				toolMeta:   map[string]string{"path": "README.md"},
+			},
+		},
+	}
+
+	view := plainANSI(m.terminalScrollView().Content)
+	for _, want := range []string{"hello", "input", `{"path":"README.md"}`, "project docs"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("terminal detail view missing %q:\n%s", want, view)
+		}
+	}
+
+	collapsed, ok := m.renderScrollbackTranscriptEntry(m.entries[1])
+	if !ok {
+		t.Fatal("scrollback tool entry did not render")
+	}
+	collapsed = plainANSI(collapsed)
+	if strings.Contains(collapsed, "project docs") || strings.Contains(collapsed, `{"path":"README.md"}`) {
+		t.Fatalf("scrollback entry leaked expanded details:\n%s", collapsed)
 	}
 }
 
