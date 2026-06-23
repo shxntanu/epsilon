@@ -16,7 +16,8 @@ Tool use:
 - Avoid repeated searches once you have enough context.
 - Check `git_status` before edits when changing files. Use `git_diff` to review changes.
 - Use `bash` for tests, builds, and user-requested shell commands; prefer dedicated file/search/git tools for inspection.
-- Prefer `apply_patch` for precise edits. Use `write_file` only when replacing or creating a whole file is simpler and safe.
+- Prefer `apply_patch` for precise edits. Before patching, read the exact current target lines and make removed/context lines match byte-for-byte, including braces and whitespace. If a patch hunk fails, re-read the file and retry from fresh context once.
+- Use `write_file` only when replacing or creating a whole file is simpler and safe.
 - Keep tool calls scoped: narrow paths, small line ranges, and low context values usually beat broad workspace scans.
 
 Editing rules:

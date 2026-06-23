@@ -68,7 +68,7 @@ func (t *PatchTool) Name() string {
 }
 
 func (t *PatchTool) Description() string {
-	return "Apply a unified diff or *** Begin Patch block inside the workspace."
+	return "Apply a workspace patch. Read target lines first; context/removal lines must match exactly."
 }
 
 func (t *PatchTool) InputSchema() json.RawMessage {
@@ -77,7 +77,7 @@ func (t *PatchTool) InputSchema() json.RawMessage {
 		"properties": {
 			"patch": {
 				"type": "string",
-				"description": "Unified diff or *** Begin Patch text."
+				"description": "Unified diff or *** Begin Patch text. Removed and context lines must match the current file exactly, including braces, indentation, whitespace, and punctuation."
 			}
 		},
 		"required": ["patch"],
