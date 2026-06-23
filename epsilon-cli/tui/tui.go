@@ -287,7 +287,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			Padding(0, 1),
 		statusReady: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(tuiInkStrong).
+			Foreground(tuiBackground).
 			Background(tuiStatusReady).
 			Padding(0, 1),
 		help: lipgloss.NewStyle().
@@ -316,26 +316,27 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		toolBlock: lipgloss.NewStyle().
 			Foreground(tuiInk).
 			Background(tuiBackground),
+		// GitHub-like diff coloring (independent from the rest of the harness palette).
 		diffBlock: lipgloss.NewStyle().
 			Foreground(tuiInk).
-			Background(tuiSurface).
+			Background(tuiBackground).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderLeft(true).
-			BorderForeground(tuiSubtle).
+			BorderForeground(lipgloss.Color("#30363D")).
 			Padding(0, 1),
 		diffHeader: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(tuiAccentModel).
+			Foreground(lipgloss.Color("#8B949E")).
 			Bold(true),
 		diffAdd: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(tuiAccentOK),
+			Foreground(lipgloss.Color("#3FB950")),
 		diffRemove: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(tuiAccentDanger),
+			Foreground(lipgloss.Color("#FF7B72")),
 		diffMeta: lipgloss.NewStyle().
 			Background(tuiBackground).
-			Foreground(tuiMuted),
+			Foreground(lipgloss.Color("#8B949E")),
 		tool: lipgloss.NewStyle().
 			Background(tuiBackground).
 			Foreground(tuiAccentTool),

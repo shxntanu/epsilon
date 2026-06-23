@@ -128,9 +128,9 @@ func (p permissionPrompt) selectedStyle(choice int) lipgloss.Style {
 	style := p.styles.selected
 	switch choice {
 	case 0:
-		return style.Background(tuiStatusReady)
+		return style.Foreground(tuiBackground).Background(tuiStatusReady)
 	case 1:
-		return style.Background(tuiStatusWorking)
+		return style.Foreground(tuiBackground).Background(tuiStatusWorking)
 	case 2:
 		return style.Background(tuiStatusDanger)
 	default:
