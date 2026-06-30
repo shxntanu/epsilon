@@ -710,7 +710,9 @@ func (m model) terminalScrollMode() bool {
 
 func (m model) terminalScrollView() tea.View {
 	parts := make([]string, 0, 6)
-	if m.showEvents {
+	if m.shouldRenderStartupHeader() {
+		parts = append(parts, m.renderStartupHeader(m.width))
+	} else if m.showEvents {
 		if detail := m.renderTerminalDetailTranscript(); detail != "" {
 			parts = append(parts, detail)
 		}
@@ -743,6 +745,24 @@ func (m model) terminalScrollView() tea.View {
 	view.BackgroundColor = tuiBackgroundColor
 	view.MouseMode = tea.MouseModeNone
 	return view
+}
+
+func (m model) shouldRenderStartupHeader() bool {
+	if m.busy || m.permission != nil || m.modelPicker != nil || m.sessionPicker != nil ||
+		m.slashSelectorActive() {
+		return false
+	}
+	for _, entry := range m.entries {
+		switch entry.kind {
+		case transcriptEvent:
+			if m.showEvents {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (m model) currentSessionLabel() string {
@@ -1351,9 +1371,6 @@ func (m *model) terminalScrollbackCmd() tea.Cmd {
 	if !m.terminalScrollMode() || m.scrollPrinting {
 		return nil
 	}
-	if strings.TrimSpace(m.scrollHeader) == "" {
-		m.scrollHeader = m.renderHeaderText(m.width)
-	}
 
 	printed := m.scrollPrinted
 	if printed > len(m.entries) {
@@ -1361,11 +1378,7 @@ func (m *model) terminalScrollbackCmd() tea.Cmd {
 	}
 
 	headerOut := m.scrollHeaderOut
-	lines := make([]string, 0, max(0, len(m.entries)-printed)+1)
-	if !headerOut {
-		lines = append(lines, m.scrollHeader)
-		headerOut = true
-	}
+	lines := make([]string, 0, max(0, len(m.entries)-printed))
 	for printed < len(m.entries) {
 		if !m.isTerminalPrintableEntry(printed) {
 			break

@@ -39,18 +39,129 @@ func (m model) renderHeaderText(width int) string {
 	logo := m.renderLogo()
 	status := m.renderStatusBadge()
 	innerWidth := max(20, width-2)
-	sessionWidth := innerWidth - lipgloss.Width(logo) - lipgloss.Width(status) - 2
-
-	parts := []string{logo}
-	if sessionWidth >= 10 {
-		parts = append(parts, m.renderSessionBadge(sessionWidth))
+	sessionWidth := max(0, innerWidth-lipgloss.Width(logo)-lipgloss.Width(status)-2)
+	session := ""
+	if sessionWidth >= 12 {
+		session = m.renderSessionBadge(sessionWidth)
 	}
-	parts = append(parts, status)
 
-	return lipgloss.JoinHorizontal(lipgloss.Center, parts...)
+	leftWidth := lipgloss.Width(logo)
+	rightWidth := lipgloss.Width(status)
+	sessionRenderedWidth := lipgloss.Width(session)
+	gap := max(1, innerWidth-leftWidth-rightWidth-sessionRenderedWidth)
+	leftGap := gap / 2
+	rightGap := gap - leftGap
+
+	return logo +
+		strings.Repeat(" ", leftGap) +
+		session +
+		strings.Repeat(" ", rightGap) +
+		status
+}
+
+func (m model) renderStartupHeader(width int) string {
+	contentWidth := max(34, width-4)
+	if contentWidth > 96 {
+		contentWidth = 96
+	}
+
+	title := lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		m.renderLogoMark(),
+		" ",
+		lipgloss.NewStyle().
+			Foreground(tuiInkStrong).
+			Bold(true).
+			Render("Epsilon"),
+		" ",
+		m.styles.muted.Render("agent harness"),
+	)
+
+	status := m.renderStatusBadge()
+	session := "session " + m.currentSessionLabel()
+	if lipgloss.Width(session) > contentWidth-lipgloss.Width(status)-3 {
+		session = "session " + fitHeaderText(m.currentSessionLabel(),
+			max(8, contentWidth-lipgloss.Width(status)-11))
+	}
+
+	modelLine := m.startupModelLine()
+	if modelLine == "" {
+		modelLine = "ready for local code work"
+	}
+
+	left := lipgloss.NewStyle().
+		Width(max(16, contentWidth/3)).
+		Align(lipgloss.Center).
+		Render(strings.Join([]string{
+			m.styles.title.Render("Welcome back"),
+			"",
+			m.renderLogoMarkLarge(),
+			"",
+			m.styles.muted.Render(modelLine),
+		}, "\n"))
+
+	rightWidth := max(24, contentWidth-lipgloss.Width(left)-4)
+	right := lipgloss.NewStyle().
+		Width(rightWidth).
+		Render(strings.Join([]string{
+			lipgloss.JoinHorizontal(lipgloss.Center,
+				m.styles.tool.Bold(true).Render("Native terminal mode"),
+				" ",
+				status,
+			),
+			m.styles.muted.Render("Clean scrollback stays concise while the managed view holds rich state."),
+			"",
+			m.styles.tool.Render("Ctrl+O") + " " + m.styles.muted.Render("opens the detailed transcript"),
+			m.styles.tool.Render("Ctrl+G") + " " + m.styles.muted.Render("switches to application view"),
+			m.styles.tool.Render("/") + " " + m.styles.muted.Render("runs local commands"),
+		}, "\n"))
+
+	body := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		left,
+		m.styles.muted.Render(" │ "),
+		right,
+	)
+
+	return lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(tuiLine).
+		Foreground(tuiInk).
+		Background(tuiBackground).
+		Padding(1, 2).
+		Width(contentWidth).
+		Render(title + "\n\n" + body)
+}
+
+func (m model) startupModelLine() string {
+	model := strings.TrimSpace(currentString(m.currentModel))
+	effort := strings.TrimSpace(currentString(m.currentEffort))
+	if model == "" && effort == "" {
+		return ""
+	}
+	if model == "" {
+		return "effort " + effort
+	}
+	if effort == "" || effort == "off" {
+		return model
+	}
+	return model + " · " + effort
 }
 
 func (m model) renderLogo() string {
+	return lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		m.renderLogoMark(),
+		" ",
+		lipgloss.NewStyle().
+			Background(tuiBackground).
+			Foreground(tuiInkStrong).
+			Bold(true).
+			Render("Epsilon"),
+	)
+}
+
+func (m model) renderLogoMark() string {
 	marks := []string{"✶", "✷", "✸", "✹"}
 	colors := []color.Color{tuiAccentAgent, tuiAccentInfo, tuiAccentModel, tuiAccentOK}
 	frame := m.headerFrame % len(marks)
@@ -61,21 +172,24 @@ func (m model) renderLogo() string {
 		color = colors[frame]
 	}
 
-	return lipgloss.JoinHorizontal(
-		lipgloss.Center,
-		lipgloss.NewStyle().
-			Background(tuiSurface).
-			Foreground(color).
-			Bold(true).
-			Padding(0, 1).
-			Render(mark),
-		lipgloss.NewStyle().
-			Background(tuiSurface2).
-			Foreground(tuiInkStrong).
-			Bold(true).
-			Padding(0, 1).
-			Render("Epsilon"),
-	)
+	return lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(color).
+		Bold(true).
+		Render(mark)
+}
+
+func (m model) renderLogoMarkLarge() string {
+	mark := []string{
+		"  ▄██▄  ",
+		" ██  ██ ",
+		" ██▄▄██ ",
+		"  ▀██▀  ",
+	}
+	return lipgloss.NewStyle().
+		Foreground(tuiAccentAgent).
+		Bold(true).
+		Render(strings.Join(mark, "\n"))
 }
 
 func (m model) renderSessionBadge(width int) string {
