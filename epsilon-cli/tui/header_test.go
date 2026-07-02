@@ -6,12 +6,12 @@ import (
 )
 
 func TestHeaderAnimationState(t *testing.T) {
-	idle := model{status: "ready"}
+	idle := model{activityState: activityState{status: "ready"}}
 	if idle.shouldAnimateHeader() {
 		t.Fatal("idle ready header should not animate")
 	}
 
-	active := model{status: "thinking", busy: true}
+	active := model{activityState: activityState{status: "thinking", busy: true}}
 	if !active.shouldAnimateHeader() {
 		t.Fatal("thinking header should animate")
 	}
@@ -19,8 +19,10 @@ func TestHeaderAnimationState(t *testing.T) {
 
 func TestRenderHeaderTextTruncatesLongSession(t *testing.T) {
 	m := model{
-		status:       "thinking",
-		sessionTitle: "trace a very long multi repository refactor with streaming output",
+		activityState: activityState{
+			status:       "thinking",
+			sessionTitle: "trace a very long multi repository refactor with streaming output",
+		},
 	}
 
 	header := plainANSI(m.renderHeaderText(54))
@@ -36,8 +38,14 @@ func TestRenderHeaderTextTruncatesLongSession(t *testing.T) {
 }
 
 func TestStatusBadgeUsesAnimatedThinkingFrame(t *testing.T) {
-	first := plainANSI(model{status: "thinking", headerFrame: 0}.renderStatusBadge())
-	second := plainANSI(model{status: "thinking", headerFrame: 1}.renderStatusBadge())
+	first := plainANSI(model{activityState: activityState{
+		status:      "thinking",
+		headerFrame: 0,
+	}}.renderStatusBadge())
+	second := plainANSI(model{activityState: activityState{
+		status:      "thinking",
+		headerFrame: 1,
+	}}.renderStatusBadge())
 
 	if first == second {
 		t.Fatalf("thinking badge did not change across frames: %q", first)

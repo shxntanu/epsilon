@@ -62,12 +62,16 @@ func TestRenderSlashSelectorUsesCommandPaletteTreatment(t *testing.T) {
 	composer := newComposer()
 	composer.SetValue("/")
 	m := model{
-		width:    100,
-		composer: composer,
-		slash:    slash.NewDefaultRegistry(),
-		styles: selectorStyles(styles{
-			muted: lipgloss.NewStyle(),
-		}),
+		layoutState: layoutState{width: 100},
+		inputState: inputState{
+			composer: composer,
+			slash:    slash.NewDefaultRegistry(),
+		},
+		visualState: visualState{
+			styles: selectorStyles(styles{
+				muted: lipgloss.NewStyle(),
+			}),
+		},
 	}
 
 	rendered, ok := m.renderSlashSelector()
@@ -98,8 +102,10 @@ func TestPromptHistoryCyclesAndRestoresDraft(t *testing.T) {
 	composer := newComposer()
 	composer.SetValue("current draft")
 	m := model{
-		composer:      composer,
-		promptHistory: []string{"first prompt", "second prompt", "third prompt"},
+		inputState: inputState{
+			composer:      composer,
+			promptHistory: []string{"first prompt", "second prompt", "third prompt"},
+		},
 	}
 
 	if !m.recallPromptHistory(-1) {
@@ -131,8 +137,10 @@ func TestPromptHistoryCyclesAndRestoresDraft(t *testing.T) {
 func TestPromptHistoryRestoresEmptyDraft(t *testing.T) {
 	composer := newComposer()
 	m := model{
-		composer:      composer,
-		promptHistory: []string{"previous prompt"},
+		inputState: inputState{
+			composer:      composer,
+			promptHistory: []string{"previous prompt"},
+		},
 	}
 
 	if !m.recallPromptHistory(-1) {
@@ -152,8 +160,10 @@ func TestPromptHistoryRestoresEmptyDraft(t *testing.T) {
 func TestPromptHistoryStopsAtOldestPrompt(t *testing.T) {
 	composer := newComposer()
 	m := model{
-		composer:      composer,
-		promptHistory: []string{"first prompt", "second prompt"},
+		inputState: inputState{
+			composer:      composer,
+			promptHistory: []string{"first prompt", "second prompt"},
+		},
 	}
 
 	if !m.recallPromptHistory(-1) || !m.recallPromptHistory(-1) || !m.recallPromptHistory(-1) {
@@ -167,8 +177,10 @@ func TestPromptHistoryStopsAtOldestPrompt(t *testing.T) {
 func TestUpAndDownKeysNavigatePromptHistory(t *testing.T) {
 	composer := newComposer()
 	m := model{
-		composer:      composer,
-		promptHistory: []string{"summarize this repo", "explain the tests"},
+		inputState: inputState{
+			composer:      composer,
+			promptHistory: []string{"summarize this repo", "explain the tests"},
+		},
 	}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
@@ -203,8 +215,10 @@ func TestUpAndDownKeysNavigateCursorInMultilineComposer(t *testing.T) {
 	composer := newComposer()
 	composer.SetValue("first line\nsecond line")
 	m := model{
-		composer:      composer,
-		promptHistory: []string{"previous prompt"},
+		inputState: inputState{
+			composer:      composer,
+			promptHistory: []string{"previous prompt"},
+		},
 	}
 	if m.composer.CursorLine() != 1 {
 		t.Fatalf("cursor line = %d, want final line", m.composer.CursorLine())
@@ -263,13 +277,17 @@ func TestDensityModeFromSlash(t *testing.T) {
 
 func TestRenderToolEntryHidesDetailsUntilExpanded(t *testing.T) {
 	m := model{
-		width:   80,
-		density: densityComfortable,
-		styles: styles{
-			tool:      lipgloss.NewStyle(),
-			error:     lipgloss.NewStyle(),
-			muted:     lipgloss.NewStyle(),
-			toolBlock: lipgloss.NewStyle(),
+		layoutState: layoutState{
+			width:   80,
+			density: densityComfortable,
+		},
+		visualState: visualState{
+			styles: styles{
+				tool:      lipgloss.NewStyle(),
+				error:     lipgloss.NewStyle(),
+				muted:     lipgloss.NewStyle(),
+				toolBlock: lipgloss.NewStyle(),
+			},
 		},
 	}
 	entry := transcriptEntry{
@@ -305,14 +323,18 @@ func TestRenderToolEntryHidesDetailsUntilExpanded(t *testing.T) {
 
 func TestRenderBashToolEntryUsesCodexLikeDetailTreatment(t *testing.T) {
 	m := model{
-		width:      80,
-		density:    densityComfortable,
-		showEvents: true,
-		styles: styles{
-			tool:      lipgloss.NewStyle(),
-			error:     lipgloss.NewStyle(),
-			muted:     lipgloss.NewStyle(),
-			toolBlock: lipgloss.NewStyle(),
+		layoutState: layoutState{
+			width:      80,
+			density:    densityComfortable,
+			showEvents: true,
+		},
+		visualState: visualState{
+			styles: styles{
+				tool:      lipgloss.NewStyle(),
+				error:     lipgloss.NewStyle(),
+				muted:     lipgloss.NewStyle(),
+				toolBlock: lipgloss.NewStyle(),
+			},
 		},
 	}
 	entry := transcriptEntry{
@@ -333,13 +355,17 @@ func TestRenderBashToolEntryUsesCodexLikeDetailTreatment(t *testing.T) {
 
 func TestRenderToolGroupHidesNestedDetailsUntilExpanded(t *testing.T) {
 	m := model{
-		width:   80,
-		density: densityCompact,
-		styles: styles{
-			tool:      lipgloss.NewStyle(),
-			error:     lipgloss.NewStyle(),
-			muted:     lipgloss.NewStyle(),
-			toolBlock: lipgloss.NewStyle(),
+		layoutState: layoutState{
+			width:   80,
+			density: densityCompact,
+		},
+		visualState: visualState{
+			styles: styles{
+				tool:      lipgloss.NewStyle(),
+				error:     lipgloss.NewStyle(),
+				muted:     lipgloss.NewStyle(),
+				toolBlock: lipgloss.NewStyle(),
+			},
 		},
 	}
 	entry := transcriptEntry{
@@ -382,13 +408,17 @@ func TestRenderToolGroupHidesNestedDetailsUntilExpanded(t *testing.T) {
 
 func TestTerminalScrollbackWaitsForLiveEntries(t *testing.T) {
 	m := model{
-		width:        80,
-		mouseCapture: true,
-		sessionTitle: "test session",
-		streaming:    1,
-		entries: []transcriptEntry{
-			{kind: transcriptUser, text: "hello"},
-			{kind: transcriptAgent, text: "partial"},
+		layoutState: layoutState{
+			width:        80,
+			mouseCapture: true,
+		},
+		activityState: activityState{sessionTitle: "test session"},
+		transcriptState: transcriptState{
+			streaming: 1,
+			entries: []transcriptEntry{
+				{kind: transcriptUser, text: "hello"},
+				{kind: transcriptAgent, text: "partial"},
+			},
 		},
 	}
 	m.prepareTerminalScroll()
@@ -427,16 +457,19 @@ func TestTerminalViewShowsPendingReplayTranscript(t *testing.T) {
 	composer := newComposer()
 	composer.SetWidth(80)
 	m := model{
-		width:         80,
-		composer:      composer,
-		mouseCapture:  true,
-		sessionTitle:  "test session",
-		streaming:     -1,
-		scrollReplay:  true,
-		scrollPrinted: 0,
-		entries: []transcriptEntry{
-			{kind: transcriptUser, text: "hello"},
-			{kind: transcriptAgent, text: "hi there"},
+		layoutState: layoutState{
+			width:        80,
+			mouseCapture: true,
+		},
+		inputState:      inputState{composer: composer},
+		activityState:   activityState{sessionTitle: "test session"},
+		scrollbackState: scrollbackState{scrollReplay: true},
+		transcriptState: transcriptState{
+			streaming: -1,
+			entries: []transcriptEntry{
+				{kind: transcriptUser, text: "hello"},
+				{kind: transcriptAgent, text: "hi there"},
+			},
 		},
 	}
 
@@ -450,18 +483,23 @@ func TestTerminalViewShowsPendingReplayTranscript(t *testing.T) {
 
 func TestDetailsDoNotReplayTerminalScrollback(t *testing.T) {
 	m := model{
-		width:           80,
-		composer:        newComposer(),
-		mouseCapture:    true,
-		sessionTitle:    "test session",
-		streaming:       -1,
-		scrollPrinted:   2,
-		scrollHeader:    "header",
-		scrollHeaderOut: true,
-		scrollReplay:    false,
-		entries: []transcriptEntry{
-			{kind: transcriptUser, text: "hello"},
-			{kind: transcriptTool, text: "Used read_file", toolName: "read_file", toolResult: "body"},
+		layoutState: layoutState{
+			width:        80,
+			mouseCapture: true,
+		},
+		inputState:    inputState{composer: newComposer()},
+		activityState: activityState{sessionTitle: "test session"},
+		scrollbackState: scrollbackState{
+			scrollPrinted:   2,
+			scrollHeader:    "header",
+			scrollHeaderOut: true,
+		},
+		transcriptState: transcriptState{
+			streaming: -1,
+			entries: []transcriptEntry{
+				{kind: transcriptUser, text: "hello"},
+				{kind: transcriptTool, text: "Used read_file", toolName: "read_file", toolResult: "body"},
+			},
 		},
 	}
 
@@ -489,30 +527,36 @@ func TestTerminalDetailViewExpandsTranscriptInBubbleTeaOnly(t *testing.T) {
 	composer := newComposer()
 	composer.SetWidth(80)
 	m := model{
-		width:        80,
-		composer:     composer,
-		mouseCapture: true,
-		sessionTitle: "test session",
-		streaming:    -1,
-		showEvents:   true,
-		styles: styles{
-			tool:       lipgloss.NewStyle(),
-			error:      lipgloss.NewStyle(),
-			muted:      lipgloss.NewStyle(),
-			toolBlock:  lipgloss.NewStyle(),
-			userLabel:  lipgloss.NewStyle(),
-			userBlock:  lipgloss.NewStyle(),
-			statusLine: lipgloss.NewStyle(),
+		layoutState: layoutState{
+			width:        80,
+			mouseCapture: true,
+			showEvents:   true,
 		},
-		entries: []transcriptEntry{
-			{kind: transcriptUser, text: "hello"},
-			{
-				kind:       transcriptTool,
-				text:       "Used read_file",
-				toolName:   "read_file",
-				toolInput:  `{"path":"README.md"}`,
-				toolResult: "project docs",
-				toolMeta:   map[string]string{"path": "README.md"},
+		inputState:    inputState{composer: composer},
+		activityState: activityState{sessionTitle: "test session"},
+		transcriptState: transcriptState{
+			streaming: -1,
+			entries: []transcriptEntry{
+				{kind: transcriptUser, text: "hello"},
+				{
+					kind:       transcriptTool,
+					text:       "Used read_file",
+					toolName:   "read_file",
+					toolInput:  `{"path":"README.md"}`,
+					toolResult: "project docs",
+					toolMeta:   map[string]string{"path": "README.md"},
+				},
+			},
+		},
+		visualState: visualState{
+			styles: styles{
+				tool:       lipgloss.NewStyle(),
+				error:      lipgloss.NewStyle(),
+				muted:      lipgloss.NewStyle(),
+				toolBlock:  lipgloss.NewStyle(),
+				userLabel:  lipgloss.NewStyle(),
+				userBlock:  lipgloss.NewStyle(),
+				statusLine: lipgloss.NewStyle(),
 			},
 		},
 	}

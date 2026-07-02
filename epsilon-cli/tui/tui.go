@@ -123,62 +123,16 @@ const bottomGutterHeight = 1
 const defaultSessionTitleMaxRunes = 48
 
 type model struct {
-	ctx             context.Context
-	session         *session.Session
-	subscription    *events.Subscription
-	events          <-chan types.Event
-	composer        composer
-	slash           *slash.Registry
-	slashCursor     int
-	spinner         spinner.Model
-	thinking        thinking
-	viewport        viewport.Model
-	contextView     func() contextwindow.Summary
-	modelInfo       func() (types.ModelInfo, bool)
-	listModels      func(context.Context) ([]types.ModelInfo, error)
-	listSessions    func(context.Context) ([]events.SessionInfo, error)
-	resumeSession   func(context.Context, string) (*session.Session, error)
-	currentModel    func() string
-	currentEffort   func() string
-	setModel        func(context.Context, string) error
-	setEffort       func(string) error
-	renameSession   func(context.Context, string, string) (bool, error)
-	modelPicker     *modelPicker
-	sessionPicker   *sessionPicker
-	permission      *permissionPrompt
-	entries         []transcriptEntry
-	pendingUsers    []string
-	promptHistory   []string
-	historyIndex    int
-	historyDraft    string
-	historyActive   bool
-	dirty           bool
-	followOutput    bool
-	width           int
-	height          int
-	busy            bool
-	showSpinner     bool
-	showEvents      bool
-	showContext     bool
-	showBackground  bool
-	mouseCapture    bool
-	density         densityMode
-	status          string
-	sessionTitle    string
-	headerFrame     int
-	headerAnimating bool
-	scrollPrinted   int
-	scrollHeader    string
-	scrollHeaderOut bool
-	scrollReplay    bool
-	scrollPrinting  bool
-	styles          styles
-	broker          *PermissionBroker
-	streaming       int
-	stepCancel      context.CancelFunc
-	stepSeq         uint64
-	activeStepID    uint64
-	quitArmed       bool
+	appState
+	providerState
+	inputState
+	overlayState
+	transcriptState
+	layoutState
+	activityState
+	scrollbackState
+	stepState
+	visualState
 }
 
 type styles struct {
@@ -381,37 +335,53 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	}
 
 	return model{
-		ctx:            ctx,
-		session:        sess,
-		subscription:   sub,
-		events:         eventStream,
-		composer:       newComposer(),
-		slash:          slashRegistry,
-		spinner:        spin,
-		thinking:       newThinking("Thinking"),
-		viewport:       vp,
-		contextView:    contextSummary,
-		modelInfo:      selectedModel,
-		listModels:     listModels,
-		listSessions:   listSessions,
-		resumeSession:  resumeSession,
-		currentModel:   currentModel,
-		currentEffort:  currentEffort,
-		setModel:       setModel,
-		setEffort:      setEffort,
-		renameSession:  renameSession,
-		showBackground: false,
-		mouseCapture:   true,
-		density:        densityComfortable,
-		status:         "ready",
-		sessionTitle:   "",
-		styles:         styles,
-		broker:         broker,
-		streaming:      -1,
-		entries:        entries,
-		dirty:          true,
-		followOutput:   true,
-		scrollReplay:   true,
+		appState: appState{
+			ctx:          ctx,
+			session:      sess,
+			subscription: sub,
+			events:       eventStream,
+			broker:       broker,
+		},
+		providerState: providerState{
+			contextView:   contextSummary,
+			modelInfo:     selectedModel,
+			listModels:    listModels,
+			listSessions:  listSessions,
+			resumeSession: resumeSession,
+			currentModel:  currentModel,
+			currentEffort: currentEffort,
+			setModel:      setModel,
+			setEffort:     setEffort,
+			renameSession: renameSession,
+		},
+		inputState: inputState{
+			composer: newComposer(),
+			slash:    slashRegistry,
+		},
+		transcriptState: transcriptState{
+			streaming: -1,
+			entries:   entries,
+		},
+		layoutState: layoutState{
+			viewport:       vp,
+			showBackground: false,
+			mouseCapture:   true,
+			density:        densityComfortable,
+			followOutput:   true,
+		},
+		activityState: activityState{
+			spinner:      spin,
+			thinking:     newThinking("Thinking"),
+			status:       "ready",
+			sessionTitle: "",
+			dirty:        true,
+		},
+		scrollbackState: scrollbackState{
+			scrollReplay: true,
+		},
+		visualState: visualState{
+			styles: styles,
+		},
 	}
 }
 
@@ -1060,7 +1030,9 @@ func (m *model) applyEvent(event types.Event, interactive bool) {
 }
 
 func hydrateTranscriptEntries(history []types.Event) []transcriptEntry {
-	rehydrated := model{streaming: -1}
+	rehydrated := model{
+		transcriptState: transcriptState{streaming: -1},
+	}
 	for _, event := range history {
 		rehydrated.applyEvent(event, false)
 	}

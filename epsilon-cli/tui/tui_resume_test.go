@@ -117,7 +117,7 @@ func TestHydrateTranscriptEntriesHandlesPermissionHistory(t *testing.T) {
 }
 
 func TestModelStartedDoesNotAppendThinkingStatus(t *testing.T) {
-	m := model{streaming: -1}
+	m := model{transcriptState: transcriptState{streaming: -1}}
 	m.applyEvent(types.Event{
 		Kind:      types.EventModelStarted,
 		CreatedAt: time.Now().UTC(),
