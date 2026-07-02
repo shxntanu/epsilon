@@ -148,6 +148,10 @@ type model struct {
 	permission      *permissionPrompt
 	entries         []transcriptEntry
 	pendingUsers    []string
+	promptHistory   []string
+	historyIndex    int
+	historyDraft    string
+	historyActive   bool
 	dirty           bool
 	followOutput    bool
 	width           int
@@ -487,6 +491,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.moveSlashSelection(-1) {
 				return m, nil
 			}
+			if m.composer.SingleLine() && m.recallPromptHistory(-1) {
+				m.resize()
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.composer, cmd = m.composer.Update(msg)
 			cmds = append(cmds, cmd)
@@ -494,6 +502,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "ctrl+n":
 			m.quitArmed = false
 			if m.moveSlashSelection(1) {
+				return m, nil
+			}
+			if m.composer.SingleLine() && m.recallPromptHistory(1) {
+				m.resize()
 				return m, nil
 			}
 			var cmd tea.Cmd
@@ -851,6 +863,53 @@ func (m *model) toggleDensity() {
 	m.density = densityComfortable
 }
 
+func (m *model) recallPromptHistory(delta int) bool {
+	if len(m.promptHistory) == 0 {
+		return false
+	}
+	if delta < 0 {
+		if !m.historyActive {
+			m.historyDraft = m.composer.Value()
+			m.historyIndex = len(m.promptHistory) - 1
+			m.historyActive = true
+		} else if m.historyIndex > 0 {
+			m.historyIndex--
+		}
+		m.composer.SetValue(m.promptHistory[m.historyIndex])
+		return true
+	}
+	if delta > 0 {
+		if !m.historyActive {
+			return false
+		}
+		if m.historyIndex < len(m.promptHistory)-1 {
+			m.historyIndex++
+			m.composer.SetValue(m.promptHistory[m.historyIndex])
+			return true
+		}
+
+		m.historyActive = false
+		m.historyIndex = len(m.promptHistory)
+		m.composer.SetValue(m.historyDraft)
+		m.historyDraft = ""
+		return true
+	}
+
+	return false
+}
+
+func (m *model) appendPromptHistory(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	m.promptHistory = append(m.promptHistory, text)
+	m.historyIndex = len(m.promptHistory)
+	m.historyDraft = ""
+	m.historyActive = false
+}
+
 func (m *model) submit() tea.Cmd {
 	if m.busy {
 		return nil
@@ -869,6 +928,7 @@ func (m *model) submit() tea.Cmd {
 		}
 	}
 
+	m.appendPromptHistory(text)
 	m.appendUserMessage(text)
 	m.pendingUsers = append(m.pendingUsers, text)
 	shouldDefaultTitle := !m.session.HasMessages() && strings.TrimSpace(m.sessionTitle) == ""

@@ -86,11 +86,33 @@ func (c composer) Update(msg tea.Msg) (composer, tea.Cmd) {
 			c.input.InsertString("\n")
 			return c, nil
 		}
+		if c.handleCommandArrow(key) {
+			return c, nil
+		}
 	}
 
 	var cmd tea.Cmd
 	c.input, cmd = c.input.Update(msg)
 	return c, cmd
+}
+
+func (c *composer) handleCommandArrow(key tea.KeyPressMsg) bool {
+	switch {
+	case key.Code == tea.KeyLeft && key.Mod&tea.ModMeta != 0,
+		key.Keystroke() == "meta+left",
+		key.Keystroke() == "cmd+left",
+		key.Keystroke() == "super+left":
+		c.input.CursorStart()
+		return true
+	case key.Code == tea.KeyRight && key.Mod&tea.ModMeta != 0,
+		key.Keystroke() == "meta+right",
+		key.Keystroke() == "cmd+right",
+		key.Keystroke() == "super+right":
+		c.input.CursorEnd()
+		return true
+	default:
+		return false
+	}
 }
 
 func (c composer) View(slashMode bool, frame int) string {
@@ -130,6 +152,18 @@ func (c composer) View(slashMode bool, frame int) string {
 
 func (c composer) Value() string {
 	return c.input.Value()
+}
+
+func (c composer) SingleLine() bool {
+	return c.input.LineCount() <= 1
+}
+
+func (c composer) CursorLine() int {
+	return c.input.Line()
+}
+
+func (c composer) CursorColumn() int {
+	return c.input.Column()
 }
 
 func (c *composer) SetValue(value string) {

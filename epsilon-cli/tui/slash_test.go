@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/shxntanu/epsilon/core/events"
@@ -90,6 +91,164 @@ func TestComposerViewShowsCommandMode(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("composer command mode missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestPromptHistoryCyclesAndRestoresDraft(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("current draft")
+	m := model{
+		composer:      composer,
+		promptHistory: []string{"first prompt", "second prompt", "third prompt"},
+	}
+
+	if !m.recallPromptHistory(-1) {
+		t.Fatal("recallPromptHistory up returned false, want true")
+	}
+	if got := m.composer.Value(); got != "third prompt" {
+		t.Fatalf("composer value = %q, want newest prompt", got)
+	}
+	if !m.recallPromptHistory(-1) {
+		t.Fatal("second history up returned false, want true")
+	}
+	if got := m.composer.Value(); got != "second prompt" {
+		t.Fatalf("composer value = %q, want previous prompt", got)
+	}
+	if !m.recallPromptHistory(1) {
+		t.Fatal("history down returned false, want true")
+	}
+	if got := m.composer.Value(); got != "third prompt" {
+		t.Fatalf("composer value = %q, want newer prompt", got)
+	}
+	if !m.recallPromptHistory(1) {
+		t.Fatal("final history down returned false, want true")
+	}
+	if got := m.composer.Value(); got != "current draft" {
+		t.Fatalf("composer value = %q, want restored draft", got)
+	}
+}
+
+func TestPromptHistoryRestoresEmptyDraft(t *testing.T) {
+	composer := newComposer()
+	m := model{
+		composer:      composer,
+		promptHistory: []string{"previous prompt"},
+	}
+
+	if !m.recallPromptHistory(-1) {
+		t.Fatal("history up returned false, want true")
+	}
+	if got := m.composer.Value(); got != "previous prompt" {
+		t.Fatalf("composer value = %q, want previous prompt", got)
+	}
+	if !m.recallPromptHistory(1) {
+		t.Fatal("history down returned false, want true")
+	}
+	if got := m.composer.Value(); got != "" {
+		t.Fatalf("composer value = %q, want empty draft restored", got)
+	}
+}
+
+func TestPromptHistoryStopsAtOldestPrompt(t *testing.T) {
+	composer := newComposer()
+	m := model{
+		composer:      composer,
+		promptHistory: []string{"first prompt", "second prompt"},
+	}
+
+	if !m.recallPromptHistory(-1) || !m.recallPromptHistory(-1) || !m.recallPromptHistory(-1) {
+		t.Fatal("history up returned false with available history")
+	}
+	if got := m.composer.Value(); got != "first prompt" {
+		t.Fatalf("composer value = %q, want oldest prompt", got)
+	}
+}
+
+func TestUpAndDownKeysNavigatePromptHistory(t *testing.T) {
+	composer := newComposer()
+	m := model{
+		composer:      composer,
+		promptHistory: []string{"summarize this repo", "explain the tests"},
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil", cmd)
+	}
+	m = updated.(model)
+	if got := m.composer.Value(); got != "explain the tests" {
+		t.Fatalf("composer value = %q, want newest prompt", got)
+	}
+
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil", cmd)
+	}
+	m = updated.(model)
+	if got := m.composer.Value(); got != "summarize this repo" {
+		t.Fatalf("composer value = %q, want older prompt", got)
+	}
+
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil", cmd)
+	}
+	m = updated.(model)
+	if got := m.composer.Value(); got != "explain the tests" {
+		t.Fatalf("composer value = %q, want newer prompt", got)
+	}
+}
+
+func TestUpAndDownKeysNavigateCursorInMultilineComposer(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("first line\nsecond line")
+	m := model{
+		composer:      composer,
+		promptHistory: []string{"previous prompt"},
+	}
+	if m.composer.CursorLine() != 1 {
+		t.Fatalf("cursor line = %d, want final line", m.composer.CursorLine())
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = updated.(model)
+	if got := m.composer.Value(); got != "first line\nsecond line" {
+		t.Fatalf("composer value = %q, want multiline prompt preserved", got)
+	}
+	if m.composer.CursorLine() != 0 {
+		t.Fatalf("cursor line = %d, want previous line", m.composer.CursorLine())
+	}
+
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated.(model)
+	if m.composer.CursorLine() != 1 {
+		t.Fatalf("cursor line = %d, want next line", m.composer.CursorLine())
+	}
+	_ = cmd
+}
+
+func TestComposerCommandArrowsMoveToLineEdges(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("first line\nsecond line")
+	if got := composer.CursorColumn(); got != len("second line") {
+		t.Fatalf("cursor column = %d, want end of second line", got)
+	}
+
+	var cmd tea.Cmd
+	composer, cmd = composer.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModMeta})
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil", cmd)
+	}
+	if got := composer.CursorColumn(); got != 0 {
+		t.Fatalf("cursor column = %d, want start of line", got)
+	}
+
+	composer, cmd = composer.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModMeta})
+	if cmd != nil {
+		t.Fatalf("cmd = %#v, want nil", cmd)
+	}
+	if got := composer.CursorColumn(); got != len("second line") {
+		t.Fatalf("cursor column = %d, want end of line", got)
 	}
 }
 
