@@ -16,6 +16,7 @@ import (
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/prompts"
 	"github.com/shxntanu/epsilon/core/session"
+	"github.com/shxntanu/epsilon/core/skills"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
@@ -39,6 +40,9 @@ type Harness struct {
 	eventStore       events.Store
 	configStore      *harnessconfig.Store
 	configSettings   harnessconfig.Settings
+	skillRegistry    *skills.Registry
+	activeSkill      *skills.Skill
+	agentsMD         string
 }
 
 const defaultEventBufferSize = 64
@@ -267,7 +271,7 @@ func (h *Harness) CurrentEffort() string {
 func (h *Harness) CurrentSystemPrompt() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.renderPromptLocked(prompts.Agent, h.systemPrompt)
+	return h.renderAgentPromptLocked()
 }
 
 func (h *Harness) SetModel(ctx context.Context, model string) error {
@@ -317,8 +321,80 @@ func (h *Harness) modelRequestSettings() types.ModelRequestSettings {
 	return types.ModelRequestSettings{
 		Model:        h.model,
 		Effort:       h.effort,
-		SystemPrompt: h.renderPromptLocked(prompts.Agent, h.systemPrompt),
+		SystemPrompt: h.renderAgentPromptLocked(),
 	}
+}
+
+func (h *Harness) Skills() []skills.Skill {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.skillRegistry.Skills()
+}
+
+func (h *Harness) ActiveSkill() *skills.Skill {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.activeSkill == nil {
+		return nil
+	}
+	skill := *h.activeSkill
+	return &skill
+}
+
+func (h *Harness) SetActiveSkill(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		h.ClearActiveSkill()
+		return nil
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.skillRegistry == nil {
+		return fmt.Errorf("skills registry is not loaded")
+	}
+	skill, ok := h.skillRegistry.Get(name)
+	if !ok {
+		return fmt.Errorf("skill %q not found", name)
+	}
+	h.activeSkill = &skill
+	return nil
+}
+
+func (h *Harness) ClearActiveSkill() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.activeSkill = nil
+}
+
+func (h *Harness) SuggestSkill(message string) *skills.Skill {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.skillRegistry == nil || h.skillRegistry.Len() == 0 {
+		return nil
+	}
+	message = strings.ToLower(strings.TrimSpace(message))
+	if message == "" {
+		return nil
+	}
+
+	var best *skills.Skill
+	bestScore := 0
+	for _, skill := range h.skillRegistry.Skills() {
+		score := skillRelevanceScore(skill, message)
+		if score > bestScore {
+			bestScore = score
+			skillCopy := skill
+			best = &skillCopy
+		}
+	}
+
+	const minConfidence = 50
+	if bestScore < minConfidence {
+		return nil
+	}
+	return best
 }
 
 func (h *Harness) RenderPrompt(id prompts.ID, extensions ...string) (string, bool) {
@@ -340,6 +416,61 @@ func (h *Harness) renderPromptLocked(id prompts.ID, extensions ...string) string
 		return strings.TrimSpace(strings.Join(extensions, "\n\n"))
 	}
 	return prompt
+}
+
+func (h *Harness) renderAgentPromptLocked() string {
+	extensions := make([]string, 0, 3)
+	if h.agentsMD != "" {
+		extensions = append(extensions, h.agentsMD)
+	}
+	if h.activeSkill != nil {
+		extensions = append(extensions, h.activeSkill.Content)
+	}
+	extensions = append(extensions, h.systemPrompt)
+	return h.renderPromptLocked(prompts.Agent, extensions...)
+}
+
+func skillRelevanceScore(skill skills.Skill, message string) int {
+	best := 0
+	for _, candidate := range []string{skill.Name, skill.Description, skill.Source} {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate == "" {
+			continue
+		}
+		if strings.Contains(message, candidate) {
+			best = max(best, 1000+len(candidate))
+		}
+		for _, token := range relevanceTokens(candidate) {
+			if strings.Contains(message, token) {
+				best += min(75, 20+len(token))
+			}
+		}
+	}
+	return best
+}
+
+func relevanceTokens(text string) []string {
+	fields := strings.FieldsFunc(text, func(r rune) bool {
+		return r < 'a' || r > 'z'
+	})
+	tokens := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if len(field) < 4 || isCommonRelevanceToken(field) {
+			continue
+		}
+		tokens = append(tokens, field)
+	}
+	return tokens
+}
+
+func isCommonRelevanceToken(token string) bool {
+	switch token {
+	case "when", "user", "wants", "with", "that", "this", "from", "into", "also",
+		"needs", "should", "code", "files", "task", "use", "using":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Harness) refreshSelectedModel(ctx context.Context) {

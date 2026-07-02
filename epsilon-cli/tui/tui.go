@@ -17,6 +17,7 @@ import (
 	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/session"
+	"github.com/shxntanu/epsilon/core/skills"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
 )
@@ -67,7 +68,9 @@ func Start(ctx context.Context, config Config) error {
 		config.Harness.ListModels, config.Harness.ListSessions, config.Harness.ResumeSession,
 		config.Harness.CurrentModel, config.Harness.CurrentEffort,
 		config.Harness.SetModel, config.Harness.SetEffort,
-		config.Harness.RenameSession, initialHistory),
+		config.Harness.RenameSession, config.Harness.SetActiveSkill,
+		config.Harness.ClearActiveSkill, config.Harness.SuggestSkill,
+		config.Harness.ActiveSkill, config.Harness.Skills, initialHistory),
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -215,6 +218,9 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	currentModel func() string, currentEffort func() string,
 	setModel func(context.Context, string) error, setEffort func(string) error,
 	renameSession func(context.Context, string, string) (bool, error),
+	setActiveSkill func(string) error, clearSkill func(),
+	suggestSkill func(string) *skills.Skill, currentSkill func() *skills.Skill,
+	listSkills func() []skills.Skill,
 	initialHistory []types.Event) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
@@ -343,16 +349,21 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			broker:       broker,
 		},
 		providerState: providerState{
-			contextView:   contextSummary,
-			modelInfo:     selectedModel,
-			listModels:    listModels,
-			listSessions:  listSessions,
-			resumeSession: resumeSession,
-			currentModel:  currentModel,
-			currentEffort: currentEffort,
-			setModel:      setModel,
-			setEffort:     setEffort,
-			renameSession: renameSession,
+			contextView:    contextSummary,
+			modelInfo:      selectedModel,
+			listModels:     listModels,
+			listSessions:   listSessions,
+			resumeSession:  resumeSession,
+			currentModel:   currentModel,
+			currentEffort:  currentEffort,
+			setModel:       setModel,
+			setEffort:      setEffort,
+			renameSession:  renameSession,
+			setActiveSkill: setActiveSkill,
+			clearSkill:     clearSkill,
+			suggestSkill:   suggestSkill,
+			currentSkill:   currentSkill,
+			listSkills:     listSkills,
 		},
 		inputState: inputState{
 			composer: newComposer(),
@@ -445,6 +456,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(cmds...)
 		}
+		if m.skillPicker != nil {
+			cmd := m.updateSkillPicker(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			if cmd := m.startHeaderAnimation(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.syncViewport()
+			if cmd := m.terminalScrollbackCmd(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
 
 		switch msg.Keystroke() {
 		case "ctrl+c":
@@ -455,9 +480,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitArmed = false
 			if m.busy {
 				m.interruptModel()
+			} else if m.skillSelectorActive() {
+				m.composer.SetValue("")
+				m.resize()
 			}
 		case "up", "ctrl+p":
 			m.quitArmed = false
+			if m.moveSkillSelection(-1) {
+				return m, nil
+			}
 			if m.moveSlashSelection(-1) {
 				return m, nil
 			}
@@ -471,6 +502,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "down", "ctrl+n":
 			m.quitArmed = false
+			if m.moveSkillSelection(1) {
+				return m, nil
+			}
 			if m.moveSlashSelection(1) {
 				return m, nil
 			}
@@ -484,6 +518,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "tab":
 			m.quitArmed = false
+			if m.completeSkillSelection() {
+				return m, nil
+			}
 			if m.completeSlashSelection() {
 				return m, nil
 			}
@@ -532,6 +569,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "enter":
 			m.quitArmed = false
+			if m.completeSkillSelection() {
+				return m, nil
+			}
 			if m.completeIncompleteSlashInput() {
 				return m, nil
 			}
@@ -663,13 +703,20 @@ func (m model) View() tea.View {
 	if selector, ok := m.renderSlashSelector(); ok {
 		parts = append(parts, selector)
 	}
+	if selector, ok := m.renderSkillSelector(); ok {
+		parts = append(parts, selector)
+	}
 	if picker, ok := m.renderModelPicker(); ok {
+		parts = append(parts, picker)
+	}
+	if picker, ok := m.renderSkillPicker(); ok {
 		parts = append(parts, picker)
 	}
 	if picker, ok := m.renderSessionPicker(); ok {
 		parts = append(parts, picker)
 	}
-	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.headerFrame),
+	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.skillComposerMode(),
+		m.composerSkillPrefix(), m.headerFrame),
 		contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	content = m.styles.screen.
@@ -709,13 +756,20 @@ func (m model) terminalScrollView() tea.View {
 	if selector, ok := m.renderSlashSelector(); ok {
 		parts = append(parts, selector)
 	}
+	if selector, ok := m.renderSkillSelector(); ok {
+		parts = append(parts, selector)
+	}
 	if picker, ok := m.renderModelPicker(); ok {
+		parts = append(parts, picker)
+	}
+	if picker, ok := m.renderSkillPicker(); ok {
 		parts = append(parts, picker)
 	}
 	if picker, ok := m.renderSessionPicker(); ok {
 		parts = append(parts, picker)
 	}
-	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.headerFrame))
+	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.skillComposerMode(),
+		m.composerSkillPrefix(), m.headerFrame))
 	if m.busy {
 		parts = append(parts, m.styles.help.Render("esc interrupt | ctrl+g app view | ctrl+c twice quit"))
 	} else {
@@ -731,7 +785,7 @@ func (m model) terminalScrollView() tea.View {
 
 func (m model) shouldRenderStartupHeader() bool {
 	if m.busy || m.permission != nil || m.modelPicker != nil || m.sessionPicker != nil ||
-		m.slashSelectorActive() {
+		m.skillPicker != nil || m.slashSelectorActive() || m.skillSelectorActive() {
 		return false
 	}
 	for _, entry := range m.entries {
@@ -779,10 +833,13 @@ func (m *model) resize() {
 		permissionHeight = 6
 	}
 	selectorHeight := m.slashSelectorHeight()
+	skillSelectorHeight := m.skillSelectorHeight()
 	modelPickerHeight := m.modelPickerHeight()
 	sessionPickerHeight := m.sessionPickerHeight()
+	skillPickerHeight := m.skillPickerHeight()
 	viewportHeight := max(3, m.height-headerHeight-m.composer.Height()-helpHeight-
-		permissionHeight-selectorHeight-modelPickerHeight-sessionPickerHeight-bottomGutterHeight)
+		permissionHeight-selectorHeight-skillSelectorHeight-modelPickerHeight-
+		sessionPickerHeight-skillPickerHeight-bottomGutterHeight)
 	viewportWidth := max(20, m.width-m.contextPanelWidth())
 
 	m.viewport.SetWidth(viewportWidth)
@@ -885,22 +942,57 @@ func (m *model) submit() tea.Cmd {
 		return nil
 	}
 
-	text, ok := m.composer.Submit()
-	if !ok {
+	text := strings.TrimSpace(m.composer.Value())
+	if text == "" {
 		return nil
 	}
 	if parsed := slash.ParseInput(text); parsed.Escaped {
 		text = slash.UnescapeInput(text)
 	} else if parsed.OK {
+		m.composer.Reset()
 		result, handled, err := m.slash.Execute(m.ctx, text, m.slashExecution())
 		if handled {
 			return m.applySlashResult(result, err)
 		}
 	}
 
+	manualSkillName := ""
+	if token, body, ok := leadingSkillToken(text); ok && token != "" {
+		if body == "" {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render("message is empty after !" + token))
+			m.dirty = true
+			return nil
+		}
+		if m.setActiveSkill == nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render("skill changes are not available"))
+			m.dirty = true
+			return nil
+		}
+		if err := m.setActiveSkill(token); err != nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render(err.Error()))
+			m.dirty = true
+			return nil
+		}
+		manualSkillName = token
+		text = body
+	}
+	m.composer.Reset()
+
 	m.appendPromptHistory(text)
 	m.appendUserMessage(text)
 	m.pendingUsers = append(m.pendingUsers, text)
+	autoSkillName := ""
+	if manualSkillName == "" && currentSkill(m.currentSkill) == nil &&
+		m.suggestSkill != nil && m.setActiveSkill != nil {
+		if skill := m.suggestSkill(text); skill != nil {
+			if err := m.setActiveSkill(skill.Name); err == nil {
+				autoSkillName = skill.Name
+			}
+		}
+	}
 	shouldDefaultTitle := !m.session.HasMessages() && strings.TrimSpace(m.sessionTitle) == ""
 	defaultTitle := defaultSessionTitle(text, defaultSessionTitleMaxRunes)
 	if shouldDefaultTitle && defaultTitle != "" {
@@ -918,6 +1010,9 @@ func (m *model) submit() tea.Cmd {
 	m.activeStepID = stepID
 
 	sessionStep := func() tea.Msg {
+		if (manualSkillName != "" || autoSkillName != "") && m.clearSkill != nil {
+			defer m.clearSkill()
+		}
 		if err := m.session.Send(stepCtx, types.UserMessage(text)); err != nil {
 			return stepDoneMsg{id: stepID, err: err}
 		}

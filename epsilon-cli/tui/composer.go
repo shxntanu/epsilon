@@ -115,7 +115,7 @@ func (c *composer) handleCommandArrow(key tea.KeyPressMsg) bool {
 	}
 }
 
-func (c composer) View(slashMode bool, frame int) string {
+func (c composer) View(slashMode bool, skillMode bool, skillPrefix string, frame int) string {
 	style := c.style
 	modeColor := tuiAccentAgent
 	modeLabel := "message"
@@ -125,6 +125,11 @@ func (c composer) View(slashMode bool, frame int) string {
 		modeColor = tuiAccentCommand
 		modeLabel = "command"
 		modeHint = "tab completes · enter runs"
+		modeMark = activeSelectorMarker(frame)
+	} else if skillMode {
+		modeColor = tuiAccentTool
+		modeLabel = "! skill"
+		modeHint = "tab completes · enter selects · esc closes"
 		modeMark = activeSelectorMarker(frame)
 	}
 
@@ -144,10 +149,27 @@ func (c composer) View(slashMode bool, frame int) string {
 	)
 	if slashMode {
 		style = style.BorderForeground(tuiAccentCommand)
+	} else if skillMode || strings.TrimSpace(skillPrefix) != "" {
+		style = style.BorderForeground(tuiAccentTool)
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, mode, c.input.View())
+	content := lipgloss.JoinVertical(lipgloss.Left, mode, c.inputView(skillPrefix))
 	return style.Width(max(0, c.width-4)).Render(content)
+}
+
+func (c composer) inputView(skillPrefix string) string {
+	view := c.input.View()
+	skillPrefix = strings.TrimSpace(skillPrefix)
+	if skillPrefix == "" {
+		return view
+	}
+
+	plainPrefix := "!" + skillPrefix
+	highlighted := lipgloss.NewStyle().
+		Background(tuiBackground).
+		Foreground(tuiAccentTool).
+		Render("!" + skillPrefix)
+	return strings.Replace(view, plainPrefix, highlighted, 1)
 }
 
 func (c composer) Value() string {
@@ -169,6 +191,10 @@ func (c composer) CursorColumn() int {
 func (c *composer) SetValue(value string) {
 	c.input.SetValue(value)
 	c.input.CursorEnd()
+}
+
+func (c *composer) Reset() {
+	c.input.Reset()
 }
 
 func (c *composer) SetWidth(width int) {

@@ -276,6 +276,7 @@ func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error
 			LiteLLMBaseURL:  config.litellmBaseURL,
 			EventBufferSize: config.eventBufferSize,
 		}),
+		core.WithWorkspaceContext(config.workspace),
 		core.WithDefaultTools(config.workspace),
 		core.WithSessionDir(config.sessionDir),
 		core.WithPermissionBroker(broker),

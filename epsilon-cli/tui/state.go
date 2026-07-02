@@ -9,6 +9,7 @@ import (
 	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/session"
+	"github.com/shxntanu/epsilon/core/skills"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
 )
@@ -22,22 +23,28 @@ type appState struct {
 }
 
 type providerState struct {
-	contextView   func() contextwindow.Summary
-	modelInfo     func() (types.ModelInfo, bool)
-	listModels    func(context.Context) ([]types.ModelInfo, error)
-	listSessions  func(context.Context) ([]events.SessionInfo, error)
-	resumeSession func(context.Context, string) (*session.Session, error)
-	currentModel  func() string
-	currentEffort func() string
-	setModel      func(context.Context, string) error
-	setEffort     func(string) error
-	renameSession func(context.Context, string, string) (bool, error)
+	contextView    func() contextwindow.Summary
+	modelInfo      func() (types.ModelInfo, bool)
+	listModels     func(context.Context) ([]types.ModelInfo, error)
+	listSessions   func(context.Context) ([]events.SessionInfo, error)
+	resumeSession  func(context.Context, string) (*session.Session, error)
+	currentModel   func() string
+	currentEffort  func() string
+	setModel       func(context.Context, string) error
+	setEffort      func(string) error
+	renameSession  func(context.Context, string, string) (bool, error)
+	setActiveSkill func(string) error
+	clearSkill     func()
+	suggestSkill   func(string) *skills.Skill
+	currentSkill   func() *skills.Skill
+	listSkills     func() []skills.Skill
 }
 
 type inputState struct {
 	composer      composer
 	slash         *slash.Registry
 	slashCursor   int
+	skillCursor   int
 	promptHistory []string
 	historyIndex  int
 	historyDraft  string
@@ -47,6 +54,7 @@ type inputState struct {
 type overlayState struct {
 	modelPicker   *modelPicker
 	sessionPicker *sessionPicker
+	skillPicker   *skillPicker
 	permission    *permissionPrompt
 }
 

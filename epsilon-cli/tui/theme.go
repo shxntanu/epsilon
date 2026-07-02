@@ -52,11 +52,15 @@ func statusBadgeStyle(status string) lipgloss.Style {
 		fg = tuiInkStrong
 		bold = true
 	case hasStatusPrefix(status, "models") || hasStatusPrefix(status, "sessions") ||
-		status == "resuming":
+		hasStatusPrefix(status, "skills") || status == "resuming":
 		bg = tuiStatusWorking
 		fg = tuiInkStrong
 	case hasStatusPrefix(status, "model:") || hasStatusPrefix(status, "effort:"):
 		bg = tuiAccentModel
+		fg = tuiInkStrong
+		bold = true
+	case hasStatusPrefix(status, "skill:"):
+		bg = tuiAccentTool
 		fg = tuiInkStrong
 		bold = true
 	case hasStatusPrefix(status, "details:") || hasStatusPrefix(status, "density:") ||

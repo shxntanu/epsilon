@@ -8,6 +8,7 @@ import (
 	"github.com/shxntanu/epsilon/core/events"
 	"github.com/shxntanu/epsilon/core/permissions"
 	"github.com/shxntanu/epsilon/core/prompts"
+	"github.com/shxntanu/epsilon/core/skills"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/tools"
 	"github.com/shxntanu/epsilon/core/types"
@@ -112,6 +113,24 @@ func WithPromptDefinition(definition prompts.Definition) Option {
 			h.promptCatalog = prompts.DefaultCatalog()
 		}
 		return h.promptCatalog.Register(definition)
+	}
+}
+
+func WithWorkspaceContext(workspaceRoot string) Option {
+	return func(h *Harness) error {
+		agentsMD, err := skills.LoadAgentsMD(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("load AGENTS.md: %w", err)
+		}
+
+		registry, err := skills.LoadRegistry(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("load skills registry: %w", err)
+		}
+
+		h.agentsMD = agentsMD
+		h.skillRegistry = registry
+		return nil
 	}
 }
 

@@ -3,12 +3,14 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/shxntanu/epsilon/core/events"
+	"github.com/shxntanu/epsilon/core/skills"
 	"github.com/shxntanu/epsilon/core/slash"
 )
 
@@ -191,6 +193,21 @@ func (m model) slashSelectorActive() bool {
 	return ok
 }
 
+func (m model) skillSelectorState() (string, []skills.Skill, bool) {
+	query, ok := skillSelectorQuery(m.composer.Value())
+	if !ok || m.listSkills == nil {
+		return "", nil, false
+	}
+
+	matches := matchSkills(m.listSkills(), query, maxSlashSelectorMatches)
+	return query, matches, true
+}
+
+func (m model) skillSelectorActive() bool {
+	_, _, ok := m.skillSelectorState()
+	return ok
+}
+
 func slashSelectorQuery(input string) (string, bool) {
 	text := strings.TrimLeft(input, " \t")
 	if text == "" || !strings.HasPrefix(text, "/") || strings.HasPrefix(text, "//") {
@@ -207,8 +224,34 @@ func slashSelectorQuery(input string) (string, bool) {
 	return body, true
 }
 
+func skillSelectorQuery(input string) (string, bool) {
+	token, _, ok := leadingSkillToken(input)
+	if !ok {
+		return "", false
+	}
+	if strings.ContainsAny(token, " \t\n") {
+		return "", false
+	}
+	text := strings.TrimLeft(input, " \t")
+	if len(text) > len(token)+1 && strings.ContainsAny(text[len(token)+1:], " \t\n") {
+		return "", false
+	}
+	return token, true
+}
+
 func (m model) slashSelectorHeight() int {
 	_, matches, ok := m.slashSelectorState()
+	if !ok {
+		return 0
+	}
+	if len(matches) == 0 {
+		return 5
+	}
+	return len(matches) + 4
+}
+
+func (m model) skillSelectorHeight() int {
+	_, matches, ok := m.skillSelectorState()
 	if !ok {
 		return 0
 	}
@@ -241,11 +284,48 @@ func (m model) renderSlashSelector() (string, bool) {
 	return m.styles.selector.Width(width).Render(strings.Join(lines, "\n")), true
 }
 
+func (m model) renderSkillSelector() (string, bool) {
+	query, matches, ok := m.skillSelectorState()
+	if !ok {
+		return "", false
+	}
+
+	width := max(20, m.width-4)
+	lines := []string{m.renderSelectorHeader("Skills", skillSelectorMeta(query, len(matches)))}
+	if len(matches) == 0 {
+		lines = append(lines, m.styles.muted.Render("No skills match !"+query))
+		lines = append(lines, m.renderSelectorHint("keep typing", "esc closes"))
+		return m.skillSelectorStyle().Width(width).Render(strings.Join(lines, "\n")), true
+	}
+
+	selected := m.clampedSkillCursor(len(matches))
+	for i, skill := range matches {
+		line := m.formatSkillRow(skill, width-4)
+		if i == selected {
+			line = activeSelectorMarker(m.headerFrame) + " " + line
+			line = m.styles.selectorActive.Width(max(1, width-4)).Render(line)
+		} else {
+			line = "  " + line
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines, m.renderSelectorHint("tab completes", "enter selects", "esc closes"))
+
+	return m.skillSelectorStyle().Width(width).Render(strings.Join(lines, "\n")), true
+}
+
 func slashSelectorMeta(query string, matches int) string {
 	if query == "" {
 		return fmt.Sprintf("%d commands", matches)
 	}
 	return fmt.Sprintf("/%s · %d matches", query, matches)
+}
+
+func skillSelectorMeta(query string, matches int) string {
+	if query == "" {
+		return fmt.Sprintf("%d skills", matches)
+	}
+	return fmt.Sprintf("!%s · %d matches", query, matches)
 }
 
 func (m model) renderSlashSelectorRow(match slash.Match, selected bool, width int) string {
@@ -271,6 +351,15 @@ func (m model) renderSlashSelectorRow(match slash.Match, selected bool, width in
 	return "  " + line
 }
 
+func (m model) formatSkillRow(skill skills.Skill, width int) string {
+	name := m.styles.selectorKey.Render("!" + skill.Name)
+	description := strings.TrimSpace(skill.Description)
+	if description != "" {
+		description = m.styles.muted.Render(description)
+	}
+	return fitSelectorRow(name, description, width-2)
+}
+
 func (m *model) moveSlashSelection(delta int) bool {
 	_, matches, ok := m.slashSelectorState()
 	if !ok || len(matches) == 0 {
@@ -278,6 +367,16 @@ func (m *model) moveSlashSelection(delta int) bool {
 	}
 
 	m.slashCursor = (m.clampedSlashCursor(len(matches)) + delta + len(matches)) % len(matches)
+	return true
+}
+
+func (m *model) moveSkillSelection(delta int) bool {
+	_, matches, ok := m.skillSelectorState()
+	if !ok || len(matches) == 0 {
+		return false
+	}
+
+	m.skillCursor = (m.clampedSkillCursor(len(matches)) + delta + len(matches)) % len(matches)
 	return true
 }
 
@@ -290,6 +389,20 @@ func (m *model) completeSlashSelection() bool {
 	selected := m.clampedSlashCursor(len(matches))
 	m.composer.SetValue("/" + matches[selected].Command.Name + " ")
 	m.slashCursor = 0
+	m.resize()
+	return true
+}
+
+func (m *model) completeSkillSelection() bool {
+	_, matches, ok := m.skillSelectorState()
+	if !ok || len(matches) == 0 {
+		return false
+	}
+
+	selected := m.clampedSkillCursor(len(matches))
+	skill := matches[selected]
+	m.composer.SetValue("!" + skill.Name + " ")
+	m.skillCursor = 0
 	m.resize()
 	return true
 }
@@ -315,6 +428,84 @@ func (m model) clampedSlashCursor(length int) int {
 		return length - 1
 	}
 	return m.slashCursor
+}
+
+func (m model) clampedSkillCursor(length int) int {
+	if length <= 0 || m.skillCursor < 0 {
+		return 0
+	}
+	if m.skillCursor >= length {
+		return length - 1
+	}
+	return m.skillCursor
+}
+
+func (m model) skillComposerMode() bool {
+	return m.skillPicker != nil || m.skillSelectorActive()
+}
+
+func (m model) composerSkillPrefix() string {
+	token, _, ok := leadingSkillToken(m.composer.Value())
+	if !ok {
+		return ""
+	}
+	return token
+}
+
+func (m model) skillSelectorStyle() lipgloss.Style {
+	return m.styles.selector.BorderForeground(tuiAccentTool)
+}
+
+func matchSkills(skillList []skills.Skill, query string, limit int) []skills.Skill {
+	type scoredSkill struct {
+		skill skills.Skill
+		score int
+	}
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	matches := make([]scoredSkill, 0, len(skillList))
+	for _, skill := range skillList {
+		score := skillSearchScore(skill, query)
+		if score <= 0 {
+			continue
+		}
+		matches = append(matches, scoredSkill{skill: skill, score: score})
+	}
+	sort.SliceStable(matches, func(i int, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score > matches[j].score
+		}
+		return matches[i].skill.Name < matches[j].skill.Name
+	})
+
+	if limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
+	}
+	results := make([]skills.Skill, 0, len(matches))
+	for _, match := range matches {
+		results = append(results, match.skill)
+	}
+	return results
+}
+
+func leadingSkillToken(input string) (string, string, bool) {
+	text := strings.TrimLeft(input, " \t")
+	if text == "" || !strings.HasPrefix(text, "!") || strings.HasPrefix(text, "!!") {
+		return "", "", false
+	}
+
+	body := strings.TrimPrefix(text, "!")
+	if body == "" {
+		return "", "", true
+	}
+	tokenEnd := len(body)
+	for i, r := range body {
+		if r == ' ' || r == '\t' || r == '\n' {
+			tokenEnd = i
+			break
+		}
+	}
+	return body[:tokenEnd], strings.TrimSpace(body[tokenEnd:]), true
 }
 
 func selectorStyles(base styles) styles {

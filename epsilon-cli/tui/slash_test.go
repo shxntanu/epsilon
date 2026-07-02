@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/shxntanu/epsilon/core/events"
+	"github.com/shxntanu/epsilon/core/skills"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
 )
@@ -90,11 +91,117 @@ func TestComposerViewShowsCommandMode(t *testing.T) {
 	composer := newComposer()
 	composer.SetWidth(80)
 
-	view := plainANSI(composer.View(true, 1))
+	view := plainANSI(composer.View(true, false, "", 1))
 	for _, want := range []string{"command", "tab completes"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("composer command mode missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestSkillSelectorQuery(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantQuery string
+		wantOK    bool
+	}{
+		{name: "skill prefix", input: "!imp", wantQuery: "imp", wantOK: true},
+		{name: "bare skill prefix", input: "!", wantQuery: "", wantOK: true},
+		{name: "escaped bang", input: "!!literal"},
+		{name: "skill with args", input: "!imp now"},
+		{name: "plain message", input: "hello"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotQuery, gotOK := skillSelectorQuery(tt.input)
+			if gotOK != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", gotOK, tt.wantOK)
+			}
+			if gotQuery != tt.wantQuery {
+				t.Fatalf("query = %q, want %q", gotQuery, tt.wantQuery)
+			}
+		})
+	}
+}
+
+func TestRenderSkillSelectorUsesToolPaletteTreatment(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("!")
+	m := model{
+		layoutState: layoutState{width: 100},
+		inputState: inputState{
+			composer: composer,
+		},
+		providerState: providerState{
+			listSkills: func() []skills.Skill {
+				return []skills.Skill{{
+					Name:        "impeccable",
+					Description: "Build polished frontend interfaces.",
+				}}
+			},
+		},
+		visualState: visualState{
+			styles: selectorStyles(styles{
+				muted: lipgloss.NewStyle(),
+			}),
+		},
+	}
+
+	rendered, ok := m.renderSkillSelector()
+	if !ok {
+		t.Fatal("selector did not render")
+	}
+	plain := plainANSI(rendered)
+	for _, want := range []string{"✦ Skills", "skills", "▸ !impeccable", "tab completes"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("selector missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestComposerViewHighlightsSkillPrefixInline(t *testing.T) {
+	composer := newComposer()
+	composer.SetWidth(80)
+	composer.SetValue("!impeccable improve the composer")
+
+	view := plainANSI(composer.View(false, false, "impeccable", 1))
+	for _, want := range []string{"!impeccable", "improve the composer"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("composer skill prefix missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "!impeccable") {
+		t.Fatalf("composer should render highlighted skill prefix, got:\n%s", view)
+	}
+}
+
+func TestCompleteSkillSelectionInsertsRequiredSkillPrefix(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("!imp")
+	m := model{
+		layoutState: layoutState{width: 100},
+		inputState: inputState{
+			composer: composer,
+		},
+		providerState: providerState{
+			listSkills: func() []skills.Skill {
+				return []skills.Skill{{Name: "impeccable"}}
+			},
+		},
+		visualState: visualState{
+			styles: selectorStyles(styles{
+				muted: lipgloss.NewStyle(),
+			}),
+		},
+	}
+
+	if !m.completeSkillSelection() {
+		t.Fatal("completeSkillSelection returned false")
+	}
+	if got := m.composer.Value(); got != "!impeccable " {
+		t.Fatalf("composer value = %q, want required skill prefix", got)
 	}
 }
 
