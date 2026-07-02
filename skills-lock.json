@@ -2,9 +2,10 @@
   "version": 1,
   "skills": {
     "impeccable": {
-      "source": "/Users/shantanu.wable/code/impeccable",
-      "sourceType": "local",
-      "computedHash": "40d665906d86d9c8a7e28ffd24ea0da3497c9b549c9ae8ff624087ede2adb20b"
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/impeccable/SKILL.md",
+      "computedHash": "3c5b226d8f79602a795a65e4fffc60928e05ad04d9d64b205ffccea274641432"
     }
   }
 }
