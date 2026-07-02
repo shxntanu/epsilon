@@ -75,6 +75,9 @@ func (p *Provider) Respond(ctx context.Context,
 	if model == "" {
 		model = p.model
 	}
+	if shouldUseResponsesAPI(model, req) {
+		return p.respondResponses(ctx, model, req)
+	}
 	payload := chatCompletionRequest{
 		Model:           model,
 		Messages:        convertMessages(req.Messages),
@@ -205,12 +208,76 @@ type chatUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+type responsesRequest struct {
+	Model     string               `json:"model"`
+	Input     []responsesInputItem `json:"input"`
+	Tools     []responsesTool      `json:"tools,omitempty"`
+	Stream    bool                 `json:"stream,omitempty"`
+	Reasoning *responsesReasoning  `json:"reasoning,omitempty"`
+}
+
+type responsesReasoning struct {
+	Effort string `json:"effort,omitempty"`
+}
+
+type responsesInputItem struct {
+	Type      string `json:"type,omitempty"`
+	Role      string `json:"role,omitempty"`
+	Content   string `json:"content,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+	Output    string `json:"output,omitempty"`
+}
+
+type responsesTool struct {
+	Type        string          `json:"type"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+type responsesResponse struct {
+	Output []responsesOutputItem `json:"output"`
+	Usage  responsesUsage        `json:"usage,omitempty"`
+}
+
+type responsesOutputItem struct {
+	Type      string                   `json:"type"`
+	Role      string                   `json:"role,omitempty"`
+	Content   []responsesOutputContent `json:"content,omitempty"`
+	CallID    string                   `json:"call_id,omitempty"`
+	Name      string                   `json:"name,omitempty"`
+	Arguments string                   `json:"arguments,omitempty"`
+}
+
+type responsesOutputContent struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type responsesUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
+type responsesStreamEvent struct {
+	Type     string              `json:"type"`
+	Delta    string              `json:"delta,omitempty"`
+	Item     responsesOutputItem `json:"item,omitempty"`
+	Response responsesResponse   `json:"response,omitempty"`
+}
+
 // StreamRespond sends a streaming chat completion request to the LiteLLM proxy.
 func (p *Provider) StreamRespond(ctx context.Context, req types.ModelRequest,
 	emit func(types.ModelDelta) error) (*types.ModelResponse, error) {
 	model := strings.TrimSpace(req.Model)
 	if model == "" {
 		model = p.model
+	}
+	if shouldUseResponsesAPI(model, req) {
+		return p.streamRespondResponses(ctx, model, req, emit)
 	}
 	payload := chatCompletionRequest{
 		Model:           model,
@@ -260,6 +327,181 @@ func (p *Provider) StreamRespond(ctx context.Context, req types.ModelRequest,
 		Message: message,
 		Usage:   usage,
 	}, nil
+}
+
+func (p *Provider) respondResponses(ctx context.Context, model string,
+	req types.ModelRequest) (*types.ModelResponse, error) {
+	payload := responsesRequest{
+		Model:     model,
+		Input:     convertResponsesInput(req.Messages),
+		Tools:     convertResponsesTools(req.Tools),
+		Reasoning: responsesReasoningFromEffort(req.Effort),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode litellm responses request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		p.baseURL+"/v1/responses", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create litellm responses request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	httpResp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send litellm responses request: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 4*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("read litellm responses response: %w", err)
+	}
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return nil, fmt.Errorf("litellm responses request failed: status %d: %s",
+			httpResp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	var decoded responsesResponse
+	if err := json.Unmarshal(respBody, &decoded); err != nil {
+		return nil, fmt.Errorf("decode litellm responses response: %w", err)
+	}
+
+	return &types.ModelResponse{
+		Message: convertResponsesMessage(decoded.Output),
+		Usage:   convertResponsesUsage(decoded.Usage),
+	}, nil
+}
+
+func (p *Provider) streamRespondResponses(ctx context.Context, model string,
+	req types.ModelRequest, emit func(types.ModelDelta) error) (*types.ModelResponse, error) {
+	payload := responsesRequest{
+		Model:     model,
+		Input:     convertResponsesInput(req.Messages),
+		Tools:     convertResponsesTools(req.Tools),
+		Stream:    true,
+		Reasoning: responsesReasoningFromEffort(req.Effort),
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode litellm responses stream request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		p.baseURL+"/v1/responses", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create litellm responses stream request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	httpResp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send litellm responses stream request: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 4*1024*1024))
+		if err != nil {
+			return nil, fmt.Errorf("read litellm responses stream error response: %w", err)
+		}
+		return nil, fmt.Errorf("litellm responses stream request failed: status %d: %s",
+			httpResp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+
+	message, usage, err := readResponsesStreamResponse(ctx, httpResp.Body, emit)
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.ModelResponse{
+		Message: message,
+		Usage:   usage,
+	}, nil
+}
+
+func readResponsesStreamResponse(ctx context.Context, body io.Reader,
+	emit func(types.ModelDelta) error) (types.Message, types.Usage, error) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var content strings.Builder
+	var output []responsesOutputItem
+	var completed *responsesResponse
+
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return types.Message{}, types.Usage{}, fmt.Errorf("litellm responses stream cancelled: %w", err)
+		}
+
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		data, ok := strings.CutPrefix(line, "data:")
+		if !ok {
+			continue
+		}
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			break
+		}
+
+		var event responsesStreamEvent
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			return types.Message{}, types.Usage{},
+				fmt.Errorf("decode litellm responses stream event: %w", err)
+		}
+		switch event.Type {
+		case "response.output_text.delta":
+			if event.Delta == "" {
+				continue
+			}
+			content.WriteString(event.Delta)
+			if emit != nil {
+				if err := emit(types.ModelDelta{Text: event.Delta}); err != nil {
+					return types.Message{}, types.Usage{}, err
+				}
+			}
+		case "response.output_item.done":
+			if event.Item.Type != "" {
+				output = append(output, event.Item)
+			}
+		case "response.completed":
+			completed = &event.Response
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return types.Message{}, types.Usage{}, fmt.Errorf("read litellm responses stream: %w", err)
+	}
+
+	if completed != nil {
+		return convertResponsesMessage(completed.Output),
+			convertResponsesUsage(completed.Usage), nil
+	}
+	if content.Len() > 0 {
+		output = append([]responsesOutputItem{{
+			Type: "message",
+			Role: string(types.RoleAssistant),
+			Content: []responsesOutputContent{{
+				Type: "output_text",
+				Text: content.String(),
+			}},
+		}}, output...)
+	}
+
+	return convertResponsesMessage(output), types.Usage{}, nil
 }
 
 func readStreamResponse(ctx context.Context, body io.Reader,
@@ -437,6 +679,26 @@ func intPtr(value int) *int {
 	return &value
 }
 
+func shouldUseResponsesAPI(model string, req types.ModelRequest) bool {
+	effort := strings.TrimSpace(req.Effort)
+	if effort == "" || len(req.Tools) == 0 {
+		return false
+	}
+	model = strings.TrimSpace(model)
+	if provider, name, ok := strings.Cut(model, "/"); ok && provider == "openai" {
+		model = name
+	}
+	return model == "gpt-5.5" || strings.HasPrefix(model, "gpt-5.5-")
+}
+
+func responsesReasoningFromEffort(effort string) *responsesReasoning {
+	effort = strings.TrimSpace(effort)
+	if effort == "" {
+		return nil
+	}
+	return &responsesReasoning{Effort: effort}
+}
+
 func convertMessages(messages []types.Message) []chatMessage {
 	converted := make([]chatMessage, 0, len(messages))
 	for _, msg := range messages {
@@ -446,6 +708,43 @@ func convertMessages(messages []types.Message) []chatMessage {
 			ToolCalls:  convertToolCalls(msg.ToolCalls),
 			ToolCallID: msg.ToolCallID,
 		})
+	}
+
+	return converted
+}
+
+func convertResponsesInput(messages []types.Message) []responsesInputItem {
+	converted := make([]responsesInputItem, 0, len(messages))
+	for _, msg := range messages {
+		content := textFromContent(msg.Content)
+		switch msg.Role {
+		case types.RoleTool:
+			converted = append(converted, responsesInputItem{
+				Type:   "function_call_output",
+				CallID: msg.ToolCallID,
+				Output: content,
+			})
+		case types.RoleAssistant:
+			if strings.TrimSpace(content) != "" {
+				converted = append(converted, responsesInputItem{
+					Role:    string(types.RoleAssistant),
+					Content: content,
+				})
+			}
+			for _, call := range msg.ToolCalls {
+				converted = append(converted, responsesInputItem{
+					Type:      "function_call",
+					CallID:    call.ID,
+					Name:      call.Name,
+					Arguments: string(call.Input),
+				})
+			}
+		default:
+			converted = append(converted, responsesInputItem{
+				Role:    string(msg.Role),
+				Content: content,
+			})
+		}
 	}
 
 	return converted
@@ -470,6 +769,29 @@ func convertTools(defs []types.ToolDefinition) []chatTool {
 				Description: def.Description,
 				Parameters:  parameters,
 			},
+		})
+	}
+
+	return converted
+}
+
+func convertResponsesTools(defs []types.ToolDefinition) []responsesTool {
+	if len(defs) == 0 {
+		return nil
+	}
+
+	converted := make([]responsesTool, 0, len(defs))
+	for _, def := range defs {
+		parameters := def.InputSchema
+		if len(parameters) == 0 {
+			parameters = emptyObjectSchema
+		}
+
+		converted = append(converted, responsesTool{
+			Type:        "function",
+			Name:        def.Name,
+			Description: def.Description,
+			Parameters:  parameters,
 		})
 	}
 
@@ -502,6 +824,51 @@ func convertResponseMessage(msg chatMessage) types.Message {
 		Content:    []types.ContentPart{types.TextPart(msg.Content)},
 		ToolCalls:  convertResponseToolCalls(msg.ToolCalls),
 		ToolCallID: msg.ToolCallID,
+	}
+}
+
+func convertResponsesMessage(output []responsesOutputItem) types.Message {
+	var content strings.Builder
+	var calls []types.ToolCall
+	for _, item := range output {
+		switch item.Type {
+		case "message":
+			for _, part := range item.Content {
+				if part.Text == "" {
+					continue
+				}
+				if content.Len() > 0 {
+					content.WriteString("\n")
+				}
+				content.WriteString(part.Text)
+			}
+		case "function_call":
+			input := json.RawMessage(strings.TrimSpace(item.Arguments))
+			if len(input) == 0 {
+				input = json.RawMessage(`{}`)
+			} else if !json.Valid(input) {
+				input = json.RawMessage(`{"_invalid_input":true}`)
+			}
+			calls = append(calls, types.ToolCall{
+				ID:    item.CallID,
+				Name:  item.Name,
+				Input: input,
+			})
+		}
+	}
+
+	return types.Message{
+		Role:      types.RoleAssistant,
+		Content:   []types.ContentPart{types.TextPart(content.String())},
+		ToolCalls: calls,
+	}
+}
+
+func convertResponsesUsage(usage responsesUsage) types.Usage {
+	return types.Usage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		TotalTokens:  usage.TotalTokens,
 	}
 }
 

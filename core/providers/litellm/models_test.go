@@ -150,6 +150,88 @@ func TestRespondUsesRequestModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestRespondUsesResponsesAPIForGPT55ToolsAndEffort(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path = %s, want /v1/responses", r.URL.Path)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if payload["model"] != "gpt-5.5" {
+			t.Fatalf("model = %v, want gpt-5.5", payload["model"])
+		}
+		if _, ok := payload["reasoning_effort"]; ok {
+			t.Fatalf("reasoning_effort should not be sent to responses payload")
+		}
+		reasoning, ok := payload["reasoning"].(map[string]any)
+		if !ok {
+			t.Fatalf("reasoning missing or wrong type: %#v", payload["reasoning"])
+		}
+		if reasoning["effort"] != "high" {
+			t.Fatalf("reasoning effort = %v, want high", reasoning["effort"])
+		}
+		tools, ok := payload["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools = %#v, want one tool", payload["tools"])
+		}
+		tool := tools[0].(map[string]any)
+		if tool["type"] != "function" || tool["name"] != "read_file" {
+			t.Fatalf("tool = %#v, want responses function tool", tool)
+		}
+
+		return jsonResponse(http.StatusOK, `{
+			"output": [
+				{"type": "message", "role": "assistant", "content": [
+					{"type": "output_text", "text": "checking"}
+				]},
+				{"type": "function_call", "call_id": "call_1", "name": "read_file", "arguments": "{\"path\":\"README.md\"}"}
+			],
+			"usage": {"input_tokens": 10, "output_tokens": 3, "total_tokens": 13}
+		}`), nil
+	})}
+
+	provider, err := New(Config{
+		BaseURL:    "http://litellm.test",
+		Model:      "default-model",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	resp, err := provider.Respond(context.Background(), types.ModelRequest{
+		Model:    "gpt-5.5",
+		Effort:   "high",
+		Messages: []types.Message{types.UserMessage("hello")},
+		Tools: []types.ToolDefinition{{
+			Name:        "read_file",
+			Description: "read a file",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if resp.Message.Content[0].Text != "checking" {
+		t.Fatalf("message = %q, want checking", resp.Message.Content[0].Text)
+	}
+	if len(resp.Message.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(resp.Message.ToolCalls))
+	}
+	call := resp.Message.ToolCalls[0]
+	if call.ID != "call_1" || call.Name != "read_file" {
+		t.Fatalf("call = %#v, want read_file call", call)
+	}
+	if string(call.Input) != `{"path":"README.md"}` {
+		t.Fatalf("call input = %s, want README path", call.Input)
+	}
+	if resp.Usage != (types.Usage{InputTokens: 10, OutputTokens: 3, TotalTokens: 13}) {
+		t.Fatalf("usage = %#v, want responses usage", resp.Usage)
+	}
+}
+
 func TestStreamRespondRequestsAndParsesUsage(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/chat/completions" {
@@ -210,6 +292,80 @@ func TestStreamRespondRequestsAndParsesUsage(t *testing.T) {
 	want := types.Usage{InputTokens: 12, OutputTokens: 5, TotalTokens: 17}
 	if resp.Usage != want {
 		t.Fatalf("usage = %#v, want %#v", resp.Usage, want)
+	}
+}
+
+func TestStreamRespondUsesResponsesAPIForGPT55ToolsAndEffort(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path = %s, want /v1/responses", r.URL.Path)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if payload["stream"] != true {
+			t.Fatalf("stream = %v, want true", payload["stream"])
+		}
+		if _, ok := payload["reasoning_effort"]; ok {
+			t.Fatalf("reasoning_effort should not be sent to responses payload")
+		}
+		reasoning, ok := payload["reasoning"].(map[string]any)
+		if !ok || reasoning["effort"] != "medium" {
+			t.Fatalf("reasoning = %#v, want medium effort", payload["reasoning"])
+		}
+
+		body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hel\"}\n\n" +
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n" +
+			"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"list_dir\",\"arguments\":\"{}\"}}\n\n" +
+			"data: {\"type\":\"response.completed\",\"response\":{\"output\":[" +
+			"{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}," +
+			"{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"list_dir\",\"arguments\":\"{}\"}" +
+			"],\"usage\":{\"input_tokens\":7,\"output_tokens\":4,\"total_tokens\":11}}}\n\n" +
+			"data: [DONE]\n\n"
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewBufferString(body)),
+		}, nil
+	})}
+
+	provider, err := New(Config{
+		BaseURL:    "http://litellm.test",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+
+	var streamed string
+	resp, err := provider.StreamRespond(context.Background(), types.ModelRequest{
+		Model:    "openai/gpt-5.5",
+		Effort:   "medium",
+		Messages: []types.Message{types.UserMessage("hello")},
+		Tools: []types.ToolDefinition{{
+			Name:        "list_dir",
+			Description: "list a directory",
+		}},
+	}, func(delta types.ModelDelta) error {
+		streamed += delta.Text
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream respond: %v", err)
+	}
+	if streamed != "hello" {
+		t.Fatalf("streamed = %q, want hello", streamed)
+	}
+	if resp.Message.Content[0].Text != "hello" {
+		t.Fatalf("message = %q, want hello", resp.Message.Content[0].Text)
+	}
+	if len(resp.Message.ToolCalls) != 1 || resp.Message.ToolCalls[0].Name != "list_dir" {
+		t.Fatalf("tool calls = %#v, want list_dir call", resp.Message.ToolCalls)
+	}
+	if resp.Usage != (types.Usage{InputTokens: 7, OutputTokens: 4, TotalTokens: 11}) {
+		t.Fatalf("usage = %#v, want responses stream usage", resp.Usage)
 	}
 }
 
