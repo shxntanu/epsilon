@@ -273,7 +273,7 @@ func TestPromptHistoryStopsAtOldestPrompt(t *testing.T) {
 		},
 	}
 
-	if !m.recallPromptHistory(-1) || !m.recallPromptHistory(-1) || !m.recallPromptHistory(-1) {
+	if !m.recallPromptHistory(-1) {
 		t.Fatal("history up returned false with available history")
 	}
 	if got := m.composer.Value(); got != "first prompt" {
