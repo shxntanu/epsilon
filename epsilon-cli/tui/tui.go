@@ -366,8 +366,9 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			listSkills:     listSkills,
 		},
 		inputState: inputState{
-			composer: newComposer(),
-			slash:    slashRegistry,
+			composer:  newComposer(),
+			slash:     slashRegistry,
+			filePaths: listWorkspaceFiles(),
 		},
 		transcriptState: transcriptState{
 			streaming: -1,
@@ -489,12 +490,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitArmed = false
 			if m.busy {
 				m.interruptModel()
+			} else if m.fileSelectorActive() {
+				m.closeFileSelector()
 			} else if m.skillSelectorActive() {
 				m.composer.SetValue("")
 				m.resize()
 			}
 		case "up", "ctrl+p":
 			m.quitArmed = false
+			if m.moveFileSelection(-1) {
+				return m, nil
+			}
 			if m.moveSkillSelection(-1) {
 				return m, nil
 			}
@@ -511,6 +517,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "down", "ctrl+n":
 			m.quitArmed = false
+			if m.moveFileSelection(1) {
+				return m, nil
+			}
 			if m.moveSkillSelection(1) {
 				return m, nil
 			}
@@ -527,6 +536,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "tab":
 			m.quitArmed = false
+			if m.completeFileSelection() {
+				return m, nil
+			}
 			if m.completeSkillSelection() {
 				return m, nil
 			}
@@ -578,6 +590,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "enter":
 			m.quitArmed = false
+			if m.completeFileSelection() {
+				return m, nil
+			}
 			if m.completeSkillSelection() {
 				return m, nil
 			}
@@ -715,6 +730,9 @@ func (m model) View() tea.View {
 	if selector, ok := m.renderSkillSelector(); ok {
 		parts = append(parts, selector)
 	}
+	if selector, ok := m.renderFileSelector(); ok {
+		parts = append(parts, selector)
+	}
 	if picker, ok := m.renderModelPicker(); ok {
 		parts = append(parts, picker)
 	}
@@ -725,6 +743,7 @@ func (m model) View() tea.View {
 		parts = append(parts, picker)
 	}
 	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.skillComposerMode(),
+		m.fileSelectorActive(),
 		m.composerSkillPrefix(), m.headerFrame),
 		contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -768,6 +787,9 @@ func (m model) terminalScrollView() tea.View {
 	if selector, ok := m.renderSkillSelector(); ok {
 		parts = append(parts, selector)
 	}
+	if selector, ok := m.renderFileSelector(); ok {
+		parts = append(parts, selector)
+	}
 	if picker, ok := m.renderModelPicker(); ok {
 		parts = append(parts, picker)
 	}
@@ -778,6 +800,7 @@ func (m model) terminalScrollView() tea.View {
 		parts = append(parts, picker)
 	}
 	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.skillComposerMode(),
+		m.fileSelectorActive(),
 		m.composerSkillPrefix(), m.headerFrame))
 	if m.busy {
 		parts = append(parts, m.styles.help.Render("esc interrupt | ctrl+g app view | ctrl+c twice quit"))
@@ -794,7 +817,8 @@ func (m model) terminalScrollView() tea.View {
 
 func (m model) shouldRenderStartupHeader() bool {
 	if m.busy || m.permission != nil || m.modelPicker != nil || m.sessionPicker != nil ||
-		m.skillPicker != nil || m.slashSelectorActive() || m.skillSelectorActive() {
+		m.skillPicker != nil || m.slashSelectorActive() || m.skillSelectorActive() ||
+		m.fileSelectorActive() {
 		return false
 	}
 	for _, entry := range m.entries {
@@ -843,12 +867,13 @@ func (m *model) resize() {
 	}
 	selectorHeight := m.slashSelectorHeight()
 	skillSelectorHeight := m.skillSelectorHeight()
+	fileSelectorHeight := m.fileSelectorHeight()
 	modelPickerHeight := m.modelPickerHeight()
 	sessionPickerHeight := m.sessionPickerHeight()
 	skillPickerHeight := m.skillPickerHeight()
 	viewportHeight := max(3, m.height-headerHeight-m.composer.Height()-helpHeight-
 		permissionHeight-selectorHeight-skillSelectorHeight-modelPickerHeight-
-		sessionPickerHeight-skillPickerHeight-bottomGutterHeight)
+		fileSelectorHeight-sessionPickerHeight-skillPickerHeight-bottomGutterHeight)
 	viewportWidth := max(20, m.width-m.contextPanelWidth())
 
 	m.viewport.SetWidth(viewportWidth)

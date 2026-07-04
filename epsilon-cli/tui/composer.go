@@ -124,7 +124,7 @@ func (c *composer) handleCommandArrow(key tea.KeyPressMsg) bool {
 	}
 }
 
-func (c composer) View(slashMode bool, skillMode bool, skillPrefix string, frame int) string {
+func (c composer) View(slashMode bool, skillMode bool, fileMode bool, skillPrefix string, frame int) string {
 	style := c.style
 	modeColor := tuiAccentAgent
 	modeLabel := "message"
@@ -139,6 +139,11 @@ func (c composer) View(slashMode bool, skillMode bool, skillPrefix string, frame
 		modeColor = tuiAccentTool
 		modeLabel = "! skill"
 		modeHint = "tab completes · enter selects · esc closes"
+		modeMark = activeSelectorMarker(frame)
+	} else if fileMode {
+		modeColor = tuiAccentInfo
+		modeLabel = "@ file"
+		modeHint = "arrows select · enter pastes · esc closes"
 		modeMark = activeSelectorMarker(frame)
 	}
 
@@ -160,6 +165,8 @@ func (c composer) View(slashMode bool, skillMode bool, skillPrefix string, frame
 		style = style.BorderForeground(tuiAccentCommand)
 	} else if skillMode || strings.TrimSpace(skillPrefix) != "" {
 		style = style.BorderForeground(tuiAccentTool)
+	} else if fileMode {
+		style = style.BorderForeground(tuiAccentInfo)
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, mode, c.inputView(skillPrefix))
@@ -241,6 +248,60 @@ func (c composer) CursorLine() int {
 
 func (c composer) CursorColumn() int {
 	return c.input.Column()
+}
+
+func (c composer) ValueBeforeCursor() string {
+	value := c.input.Value()
+	lines := strings.Split(value, "\n")
+	row := c.input.Line()
+	if row < 0 {
+		row = 0
+	}
+	if row >= len(lines) {
+		return value
+	}
+
+	lineRunes := []rune(lines[row])
+	col := min(max(0, c.input.Column()), len(lineRunes))
+	before := strings.Join(lines[:row], "\n")
+	if before != "" {
+		before += "\n"
+	}
+	return before + string(lineRunes[:col])
+}
+
+func (c composer) ValueAfterCursor() string {
+	value := c.input.Value()
+	lines := strings.Split(value, "\n")
+	row := c.input.Line()
+	if row < 0 || row >= len(lines) {
+		return ""
+	}
+
+	lineRunes := []rune(lines[row])
+	col := min(max(0, c.input.Column()), len(lineRunes))
+	after := string(lineRunes[col:])
+	if row+1 < len(lines) {
+		after += "\n" + strings.Join(lines[row+1:], "\n")
+	}
+	return after
+}
+
+func (c *composer) ReplaceTokenBeforeCursor(token string, replacement string) bool {
+	if token == "" {
+		return false
+	}
+	if !strings.HasSuffix(c.ValueBeforeCursor(), token) {
+		return false
+	}
+
+	for range []rune(token) {
+		var cmd tea.Cmd
+		c.input, cmd = c.input.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+		_ = cmd
+	}
+	c.input.InsertString(replacement)
+	return true
 }
 
 func (c *composer) SetValue(value string) {

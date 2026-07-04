@@ -91,7 +91,7 @@ func TestComposerViewShowsCommandMode(t *testing.T) {
 	composer := newComposer()
 	composer.SetWidth(80)
 
-	view := plainANSI(composer.View(true, false, "", 1))
+	view := plainANSI(composer.View(true, false, false, "", 1))
 	for _, want := range []string{"command", "tab completes"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("composer command mode missing %q:\n%s", want, view)
@@ -166,7 +166,7 @@ func TestComposerViewHighlightsSkillPrefixInline(t *testing.T) {
 	composer.SetWidth(80)
 	composer.SetValue("!impeccable improve the composer")
 
-	view := plainANSI(composer.View(false, false, "impeccable", 1))
+	view := plainANSI(composer.View(false, false, false, "impeccable", 1))
 	for _, want := range []string{"$impeccable", "improve the composer"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("composer skill prefix missing %q:\n%s", want, view)
@@ -205,6 +205,114 @@ func TestCompleteSkillSelectionInsertsRequiredSkillPrefix(t *testing.T) {
 	}
 }
 
+func TestFileSelectorQuery(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantQuery string
+		wantOK    bool
+	}{
+		{name: "file prefix", input: "@tui", wantQuery: "tui", wantOK: true},
+		{name: "bare file prefix", input: "read @", wantQuery: "", wantOK: true},
+		{name: "file in prompt", input: "explain @composer", wantQuery: "composer", wantOK: true},
+		{name: "escaped at", input: "@@literal"},
+		{name: "closed token", input: "read @composer now"},
+		{name: "trailing space closes", input: "read @composer "},
+		{name: "plain message", input: "hello"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotQuery, gotOK := fileSelectorQuery(tt.input)
+			if gotOK != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", gotOK, tt.wantOK)
+			}
+			if gotQuery != tt.wantQuery {
+				t.Fatalf("query = %q, want %q", gotQuery, tt.wantQuery)
+			}
+		})
+	}
+}
+
+func TestRenderFileSelectorUsesSelectorTreatment(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("@comp")
+	m := model{
+		layoutState: layoutState{width: 100},
+		inputState: inputState{
+			composer:  composer,
+			filePaths: []string{"epsilon-cli/tui/composer.go", "epsilon-cli/tui/tui.go"},
+		},
+		visualState: visualState{
+			styles: selectorStyles(styles{
+				muted: lipgloss.NewStyle(),
+			}),
+		},
+	}
+
+	rendered, ok := m.renderFileSelector()
+	if !ok {
+		t.Fatal("selector did not render")
+	}
+	plain := plainANSI(rendered)
+	for _, want := range []string{"✦ Files", "matches", "▸ epsilon-cli/tui/composer.go", "enter pastes"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("selector missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestCompleteFileSelectionPastesRelativePath(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("explain @comp")
+	m := model{
+		layoutState: layoutState{width: 100},
+		inputState: inputState{
+			composer:  composer,
+			filePaths: []string{"epsilon-cli/tui/composer.go"},
+		},
+		visualState: visualState{
+			styles: selectorStyles(styles{
+				muted: lipgloss.NewStyle(),
+			}),
+		},
+	}
+
+	if !m.completeFileSelection() {
+		t.Fatal("completeFileSelection returned false")
+	}
+	if got := m.composer.Value(); got != "explain epsilon-cli/tui/composer.go " {
+		t.Fatalf("composer value = %q, want selected relative path pasted", got)
+	}
+}
+
+func TestCompleteFileSelectionPreservesTextAfterCursor(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("explain @comp please")
+	for range len(" please") {
+		composer, _ = composer.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	}
+	m := model{
+		layoutState: layoutState{width: 100},
+		inputState: inputState{
+			composer:  composer,
+			filePaths: []string{"epsilon-cli/tui/composer.go"},
+		},
+		visualState: visualState{
+			styles: selectorStyles(styles{
+				muted: lipgloss.NewStyle(),
+			}),
+		},
+	}
+
+	if !m.completeFileSelection() {
+		t.Fatal("completeFileSelection returned false")
+	}
+	if got := m.composer.Value(); got != "explain epsilon-cli/tui/composer.go please" {
+		t.Fatalf("composer value = %q, want selected path before trailing text", got)
+	}
+}
+
 func TestShiftEnterInComposerInsertsNewline(t *testing.T) {
 	composer := newComposer()
 	composer.SetValue("first line")
@@ -224,7 +332,7 @@ func TestShiftEnterInComposerInsertsNewline(t *testing.T) {
 	if got != "first line\n" {
 		t.Fatalf("composer value = %q, want newline appended", got)
 	}
-	view := plainANSI(updated.(model).composer.View(false, false, "", 1))
+	view := plainANSI(updated.(model).composer.View(false, false, false, "", 1))
 	if strings.Contains(view, "\\") {
 		t.Fatalf("composer view rendered literal backslash after newline:\n%s", view)
 	}

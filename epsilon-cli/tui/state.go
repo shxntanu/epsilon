@@ -45,6 +45,8 @@ type inputState struct {
 	slash         *slash.Registry
 	slashCursor   int
 	skillCursor   int
+	fileCursor    int
+	filePaths     []string
 	promptHistory []string
 	historyIndex  int
 	historyDraft  string
