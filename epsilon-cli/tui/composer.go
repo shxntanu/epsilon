@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -81,10 +82,10 @@ func (c composer) Init() tea.Cmd {
 
 func (c composer) Update(msg tea.Msg) (composer, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.Keystroke() {
-		case "shift+enter", "alt+enter", "ctrl+j":
-			c.input.InsertString("\n")
-			return c, nil
+		if composerNewlineKey(key) {
+			var cmd tea.Cmd
+			c.input, cmd = c.input.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			return c, cmd
 		}
 		if c.handleCommandArrow(key) {
 			return c, nil
@@ -94,6 +95,14 @@ func (c composer) Update(msg tea.Msg) (composer, tea.Cmd) {
 	var cmd tea.Cmd
 	c.input, cmd = c.input.Update(msg)
 	return c, cmd
+}
+
+func composerNewlineKey(key tea.KeyPressMsg) bool {
+	switch key.Keystroke() {
+	case "shift+enter", "alt+enter", "ctrl+j":
+		return true
+	}
+	return key.Code == tea.KeyEnter && key.Mod.Contains(tea.ModShift)
 }
 
 func (c *composer) handleCommandArrow(key tea.KeyPressMsg) bool {
@@ -168,8 +177,54 @@ func (c composer) inputView(skillPrefix string) string {
 	highlighted := lipgloss.NewStyle().
 		Background(tuiBackground).
 		Foreground(tuiAccentTool).
-		Render("!" + skillPrefix)
-	return strings.Replace(view, plainPrefix, highlighted, 1)
+		Render("$" + skillPrefix)
+	return replaceVisibleText(view, plainPrefix, highlighted)
+}
+
+func replaceVisibleText(text string, target string, replacement string) string {
+	if target == "" {
+		return text
+	}
+
+	var visible strings.Builder
+	rawIndexes := make([]int, 0, len(text))
+	for i := 0; i < len(text); {
+		if text[i] == '\x1b' {
+			end := i + 1
+			for end < len(text) && text[end] != 'm' {
+				end++
+			}
+			if end < len(text) {
+				i = end + 1
+				continue
+			}
+		}
+
+		rawIndexes = append(rawIndexes, i)
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		visible.WriteRune(r)
+		i += size
+	}
+
+	visibleText := visible.String()
+	before, _, ok := strings.Cut(visibleText, target)
+	if !ok {
+		return text
+	}
+	visibleStart := utf8.RuneCountInString(before)
+	if visibleStart >= len(rawIndexes) {
+		return text
+	}
+	visibleEnd := visibleStart + utf8.RuneCountInString(target)
+	rawStart := rawIndexes[visibleStart]
+	rawEnd := len(text)
+	if visibleEnd < len(rawIndexes) {
+		rawEnd = rawIndexes[visibleEnd]
+	}
+	return text[:rawStart] + replacement + text[rawEnd:]
 }
 
 func (c composer) Value() string {

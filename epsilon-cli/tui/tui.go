@@ -471,6 +471,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+		if composerNewlineKey(msg) {
+			m.quitArmed = false
+			var cmd tea.Cmd
+			m.composer, cmd = m.composer.Update(msg)
+			cmds = append(cmds, cmd)
+			m.resize()
+			break
+		}
+
 		switch msg.Keystroke() {
 		case "ctrl+c":
 			if cmd := m.confirmQuit(); cmd != nil {

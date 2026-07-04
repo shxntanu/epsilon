@@ -167,7 +167,7 @@ func TestComposerViewHighlightsSkillPrefixInline(t *testing.T) {
 	composer.SetValue("!impeccable improve the composer")
 
 	view := plainANSI(composer.View(false, false, "impeccable", 1))
-	for _, want := range []string{"!impeccable", "improve the composer"} {
+	for _, want := range []string{"$impeccable", "improve the composer"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("composer skill prefix missing %q:\n%s", want, view)
 		}
@@ -202,6 +202,31 @@ func TestCompleteSkillSelectionInsertsRequiredSkillPrefix(t *testing.T) {
 	}
 	if got := m.composer.Value(); got != "!impeccable " {
 		t.Fatalf("composer value = %q, want required skill prefix", got)
+	}
+}
+
+func TestShiftEnterInComposerInsertsNewline(t *testing.T) {
+	composer := newComposer()
+	composer.SetValue("first line")
+	m := model{
+		inputState: inputState{
+			composer: composer,
+		},
+		visualState: visualState{
+			styles: selectorStyles(styles{
+				muted: lipgloss.NewStyle(),
+			}),
+		},
+	}
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	got := updated.(model).composer.Value()
+	if got != "first line\n" {
+		t.Fatalf("composer value = %q, want newline appended", got)
+	}
+	view := plainANSI(updated.(model).composer.View(false, false, "", 1))
+	if strings.Contains(view, "\\") {
+		t.Fatalf("composer view rendered literal backslash after newline:\n%s", view)
 	}
 }
 

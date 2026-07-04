@@ -109,7 +109,7 @@ func (m model) renderStartupHeader(width int) string {
 				" ",
 				status,
 			),
-			m.styles.muted.Render("Clean scrollback stays concise while the managed view holds rich state."),
+			m.styles.muted.Render("Clean scrollback while managed view holds rich state."),
 			"",
 			m.styles.tool.Render("Ctrl+O") + " " + m.styles.muted.Render("opens the detailed transcript"),
 			m.styles.tool.Render("Ctrl+G") + " " + m.styles.muted.Render("switches to application view"),
