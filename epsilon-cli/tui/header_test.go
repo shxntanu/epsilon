@@ -36,18 +36,3 @@ func TestRenderHeaderTextTruncatesLongSession(t *testing.T) {
 		t.Fatalf("header did not truncate long session title: %q", header)
 	}
 }
-
-func TestStatusBadgeUsesAnimatedThinkingFrame(t *testing.T) {
-	first := plainANSI(model{activityState: activityState{
-		status:      "thinking",
-		headerFrame: 0,
-	}}.renderStatusBadge())
-	second := plainANSI(model{activityState: activityState{
-		status:      "thinking",
-		headerFrame: 1,
-	}}.renderStatusBadge())
-
-	if first == second {
-		t.Fatalf("thinking badge did not change across frames: %q", first)
-	}
-}

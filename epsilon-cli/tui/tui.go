@@ -718,8 +718,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() tea.View {
-	headerText := m.renderHeaderText(m.width)
-	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	helpText := "ctrl+o details:" + onOff(m.showEvents) +
 		" | ctrl+x context:" + onOff(m.showContext) +
 		" | native scrollback | ctrl+c twice quit"
@@ -730,7 +728,7 @@ func (m model) View() tea.View {
 	contextLine := m.renderContextWidget()
 	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
 
-	parts := []string{header}
+	parts := make([]string, 0, 10)
 	if live := m.renderTerminalLiveTranscript(); live != "" {
 		parts = append(parts, m.styles.toolBlock.Render(live))
 	}
@@ -757,7 +755,7 @@ func (m model) View() tea.View {
 	}
 	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.skillComposerMode(),
 		m.fileSelectorActive(),
-		m.composerSkillPrefix(), m.headerFrame),
+		m.composerSkillPrefix(), m.headerFrame, m.currentSessionLabel()),
 		contextLine, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	content = m.styles.screen.
@@ -772,34 +770,11 @@ func (m model) View() tea.View {
 	return view
 }
 
-func (m model) shouldRenderStartupHeader() bool {
-	if m.busy || m.permission != nil || m.modelPicker != nil || m.sessionPicker != nil ||
-		m.skillPicker != nil || m.slashSelectorActive() || m.skillSelectorActive() ||
-		m.fileSelectorActive() {
-		return false
-	}
-	for _, entry := range m.entries {
-		switch entry.kind {
-		case transcriptEvent:
-			if m.showEvents {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return true
-}
-
 func (m model) currentSessionLabel() string {
 	if title := strings.TrimSpace(m.sessionTitle); title != "" {
 		return title
 	}
 	return m.session.ID()
-}
-
-func (m model) viewModeLabel() string {
-	return "terminal"
 }
 
 func (m *model) resize() {
@@ -813,14 +788,6 @@ func (m *model) resize() {
 
 func (m model) renderContextWidget() string {
 	return newContextWidget(m.contextView(), m.width, m.selectedModelInfo()).View()
-}
-
-func (m model) renderContextPanel() string {
-	width := m.contextPanelWidth()
-	if width == 0 {
-		return ""
-	}
-	return newContextPanel(m.contextView(), width, max(3, m.height-4), m.selectedModelInfo()).Panel()
 }
 
 func (m model) contextPanelWidth() int {

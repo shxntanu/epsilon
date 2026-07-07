@@ -91,7 +91,7 @@ func TestComposerViewShowsCommandMode(t *testing.T) {
 	composer := newComposer()
 	composer.SetWidth(80)
 
-	view := plainANSI(composer.View(true, false, false, "", 1))
+	view := plainANSI(composer.View(true, false, false, "", 1, "test session"))
 	for _, want := range []string{"command", "tab completes"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("composer command mode missing %q:\n%s", want, view)
@@ -166,7 +166,7 @@ func TestComposerViewHighlightsSkillPrefixInline(t *testing.T) {
 	composer.SetWidth(80)
 	composer.SetValue("!impeccable improve the composer")
 
-	view := plainANSI(composer.View(false, false, false, "impeccable", 1))
+	view := plainANSI(composer.View(false, false, false, "impeccable", 1, "test session"))
 	for _, want := range []string{"$impeccable", "improve the composer"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("composer skill prefix missing %q:\n%s", want, view)
@@ -332,7 +332,7 @@ func TestShiftEnterInComposerInsertsNewline(t *testing.T) {
 	if got != "first line\n" {
 		t.Fatalf("composer value = %q, want newline appended", got)
 	}
-	view := plainANSI(updated.(model).composer.View(false, false, false, "", 1))
+	view := plainANSI(updated.(model).composer.View(false, false, false, "", 1, "test session"))
 	if strings.Contains(view, "\\") {
 		t.Fatalf("composer view rendered literal backslash after newline:\n%s", view)
 	}

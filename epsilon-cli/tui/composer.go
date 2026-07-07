@@ -146,7 +146,8 @@ func (c *composer) handleCommandBackspace(key tea.KeyPressMsg) bool {
 	}
 }
 
-func (c composer) View(slashMode bool, skillMode bool, fileMode bool, skillPrefix string, frame int) string {
+func (c composer) View(slashMode bool, skillMode bool, fileMode bool, skillPrefix string,
+	frame int, sessionLabel string) string {
 	style := c.style
 	modeColor := tuiAccentAgent
 	modeLabel := "message"
@@ -183,6 +184,7 @@ func (c composer) View(slashMode bool, skillMode bool, fileMode bool, skillPrefi
 			Foreground(tuiFaint).
 			Render(modeHint),
 	)
+	mode = c.modeLine(mode, sessionLabel)
 	if slashMode {
 		style = style.BorderForeground(tuiAccentCommand)
 	} else if skillMode || strings.TrimSpace(skillPrefix) != "" {
@@ -193,6 +195,34 @@ func (c composer) View(slashMode bool, skillMode bool, fileMode bool, skillPrefi
 
 	content := lipgloss.JoinVertical(lipgloss.Left, mode, c.inputView(skillPrefix))
 	return style.Width(max(0, c.width-4)).Render(content)
+}
+
+func (c composer) modeLine(left string, sessionLabel string) string {
+	contentWidth := max(20, c.width-8)
+	sessionLabel = strings.TrimSpace(sessionLabel)
+	if sessionLabel == "" {
+		sessionLabel = "untitled"
+	}
+	badgePrefix := "session "
+	availableLabel := max(1, contentWidth-lipgloss.Width(left)-lipgloss.Width(badgePrefix)-4)
+	badgeLabel := fitHeaderText(sessionLabel, availableLabel)
+	badge := lipgloss.NewStyle().
+		Background(tuiSurface).
+		Foreground(tuiSubtle).
+		Padding(0, 1).
+		Render(badgePrefix) +
+		lipgloss.NewStyle().
+			Background(tuiSurface).
+			Foreground(tuiAccentAgent).
+			Bold(true).
+			Render(badgeLabel)
+
+	leftWidth := lipgloss.Width(left)
+	badgeWidth := lipgloss.Width(badge)
+	if leftWidth+badgeWidth+1 > contentWidth {
+		return left
+	}
+	return left + strings.Repeat(" ", max(1, contentWidth-leftWidth-badgeWidth)) + badge
 }
 
 func (c composer) inputView(skillPrefix string) string {

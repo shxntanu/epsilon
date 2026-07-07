@@ -225,8 +225,7 @@ func (m model) renderStatusBadge() string {
 func (m model) statusIcon(status string) string {
 	if status == "thinking" || status == "approval" || status == "resuming" ||
 		hasStatusPrefix(status, "models") || hasStatusPrefix(status, "sessions") {
-		frames := []string{"◐", "◓", "◑", "◒"}
-		return frames[m.headerFrame%len(frames)]
+		return "•"
 	}
 	switch {
 	case status == "error" || hasStatusPrefix(status, "models:error") ||
