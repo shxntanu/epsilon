@@ -605,6 +605,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+x":
 			m.quitArmed = false
 			m.showContext = !m.showContext
+			m.status = "context:" + onOff(m.showContext)
 			m.resize()
 		case "ctrl+g":
 			m.quitArmed = false
@@ -725,7 +726,6 @@ func (m model) View() tea.View {
 		helpText = "esc interrupt | " + helpText
 	}
 	help := m.styles.help.Render(helpText)
-	contextLine := m.renderContextWidget()
 	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
 
 	parts := make([]string, 0, 10)
@@ -753,10 +753,16 @@ func (m model) View() tea.View {
 	if picker, ok := m.renderSessionPicker(); ok {
 		parts = append(parts, picker)
 	}
+	if m.showContext {
+		parts = append(parts, m.renderContextPanel())
+	}
 	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.skillComposerMode(),
 		m.fileSelectorActive(),
-		m.composerSkillPrefix(), m.headerFrame, m.currentSessionLabel()),
-		contextLine, help, bottomGutter)
+		m.composerSkillPrefix(), m.headerFrame, m.currentSessionLabel()))
+	if !m.showContext {
+		parts = append(parts, m.renderContextWidget())
+	}
+	parts = append(parts, help, bottomGutter)
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	content = m.styles.screen.
 		Width(max(0, m.width)).
@@ -790,15 +796,8 @@ func (m model) renderContextWidget() string {
 	return newContextWidget(m.contextView(), m.width, m.selectedModelInfo()).View()
 }
 
-func (m model) contextPanelWidth() int {
-	if !m.showContext {
-		return 0
-	}
-	available := m.width - 24
-	if available < contextPanelMinWidth {
-		return 0
-	}
-	return min(contextPanelMaxWidth, max(contextPanelMinWidth, m.width/3))
+func (m model) renderContextPanel() string {
+	return newContextPanel(m.contextView(), m.width, 0, m.selectedModelInfo()).Panel()
 }
 
 func (m model) selectedModelInfo() *types.ModelInfo {

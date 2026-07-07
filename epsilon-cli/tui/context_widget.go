@@ -12,8 +12,7 @@ import (
 )
 
 const (
-	contextPanelMinWidth = 32
-	contextPanelMaxWidth = 44
+	contextPanelMinWidth = 20
 )
 
 type contextWidget struct {
@@ -62,25 +61,28 @@ func (w contextWidget) Panel() string {
 	width := max(contextPanelMinWidth, w.width)
 	innerWidth := max(20, width-4)
 	headingStyle := lipgloss.NewStyle().
-		Background(tuiSurface).
+		Background(tuiBackground).
 		Bold(true).
 		Foreground(tuiInkStrong)
 	subheadingStyle := lipgloss.NewStyle().
-		Background(tuiSurface).
+		Background(tuiBackground).
 		Foreground(tuiAccentAgent).
 		Bold(true)
+
+	titleRight := fmt.Sprintf("%d / %d tokens", w.summary.UsedTokens, w.summary.MaxTokens)
+	titleGap := max(1, innerWidth-lipgloss.Width("Context")-lipgloss.Width(titleRight))
 	lines := []string{
-		headingStyle.Render("Context"),
-		fmt.Sprintf("%.1f%% used", w.summary.PercentUsed*100),
-		fmt.Sprintf("%d / %d tokens", w.summary.UsedTokens, w.summary.MaxTokens),
-		fmt.Sprintf("%d tokens left", w.summary.RemainingTokens),
-		fmt.Sprintf("%d until compact", w.summary.TokensUntilCompact),
+		headingStyle.Render("Context") +
+			strings.Repeat(" ", titleGap) +
+			lipgloss.NewStyle().Background(tuiBackground).Foreground(tuiMuted).Render(titleRight),
 		contextBar(w.summary.PercentUsed, innerWidth),
+		contextSummaryLine(w.summary, innerWidth),
 	}
 
 	if w.model != nil {
+		modelLine := strings.Join(modelLines(*w.model), " | ")
 		lines = append(lines, "", subheadingStyle.Render("Model"))
-		lines = append(lines, modelLines(*w.model)...)
+		lines = append(lines, wrapLine(modelLine, innerWidth)...)
 	}
 
 	lines = append(lines,
@@ -94,23 +96,34 @@ func (w contextWidget) Panel() string {
 
 	if len(w.summary.Segments) > 0 {
 		lines = append(lines, "")
-		lines = append(lines,
-			subheadingStyle.Render("Recent"))
-		for _, segment := range recentSegments(w.summary.Segments, 5) {
+		lines = append(lines, subheadingStyle.Render("Recent"))
+		for _, segment := range recentSegments(w.summary.Segments, recentSegmentCount(innerWidth)) {
 			lines = append(lines, segmentLine(segment, innerWidth))
 		}
 	}
 
 	body := strings.Join(lines, "\n")
 	return lipgloss.NewStyle().
-		Width(max(1, width-3)).
-		Height(w.height).
-		Border(lipgloss.NormalBorder(), false, false, false, true).
+		Width(max(1, width-2)).
+		Border(lipgloss.NormalBorder(), true, false, true, false).
 		BorderForeground(tuiLine).
-		Background(tuiSurface).
+		Background(tuiBackground).
 		Foreground(tuiInk).
 		Padding(0, 1).
 		Render(body)
+}
+
+func contextSummaryLine(summary contextwindow.Summary, width int) string {
+	until := fmt.Sprintf("%d until compact", summary.TokensUntilCompact)
+	if summary.NeedsCompaction {
+		until = "compaction due"
+	}
+	parts := []string{
+		fmt.Sprintf("%.1f%% used", summary.PercentUsed*100),
+		fmt.Sprintf("%d left", summary.RemainingTokens),
+		until,
+	}
+	return truncate(strings.Join(parts, " | "), width)
 }
 
 func modelLines(model types.ModelInfo) []string {
@@ -140,7 +153,7 @@ func pricingLine(input float64, output float64) string {
 	if input == 0 && output == 0 {
 		return ""
 	}
-	return fmt.Sprintf("price/1k: $%.4g in / $%.4g out", input, output)
+	return fmt.Sprintf("price/1M: $%.4g in / $%.4g out", input*1000, output*1000)
 }
 
 func bucketLine(bucket contextwindow.Bucket, width int) string {
@@ -162,6 +175,35 @@ func recentSegments(segments []contextwindow.Segment, count int) []contextwindow
 		return segments
 	}
 	return segments[len(segments)-count:]
+}
+
+func recentSegmentCount(width int) int {
+	if width < 48 {
+		return 3
+	}
+	return 5
+}
+
+func wrapLine(text string, width int) []string {
+	if width <= 0 {
+		return nil
+	}
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	lines := []string{}
+	current := words[0]
+	for _, word := range words[1:] {
+		if lipgloss.Width(current)+1+lipgloss.Width(word) <= width {
+			current += " " + word
+			continue
+		}
+		lines = append(lines, current)
+		current = word
+	}
+	lines = append(lines, current)
+	return lines
 }
 
 func contextBar(percent float64, width int) string {

@@ -64,7 +64,7 @@ func statusBadgeStyle(status string) lipgloss.Style {
 		fg = tuiInkStrong
 		bold = true
 	case hasStatusPrefix(status, "details:") || hasStatusPrefix(status, "density:") ||
-		hasStatusPrefix(status, "background:"):
+		hasStatusPrefix(status, "background:") || hasStatusPrefix(status, "context:"):
 		bg = tuiSelected
 	case hasStatusPrefix(status, "mouse:") || hasStatusPrefix(status, "view:"):
 		bg = tuiStatusWarn
