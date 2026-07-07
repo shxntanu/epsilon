@@ -332,7 +332,7 @@ func (s *Session) executeToolCalls(ctx context.Context, calls []types.ToolCall,
 			return fmt.Errorf("publish tool call requested event: %w", err)
 		}
 
-		result, err := s.executeToolCall(ctx, call, registry)
+		result, stop, err := s.executeToolCall(ctx, call, registry)
 		if err != nil {
 			return err
 		}
@@ -344,54 +344,65 @@ func (s *Session) executeToolCalls(ctx context.Context, calls []types.ToolCall,
 		}
 		s.messages = append(s.messages, types.ToolMessage(call.ID, call.Name, result))
 		s.mu.Unlock()
+		if stop {
+			return nil
+		}
 	}
 
 	return nil
 }
 
 func (s *Session) executeToolCall(ctx context.Context, call types.ToolCall,
-	registry *tools.Registry) (types.ToolResult, error) {
+	registry *tools.Registry) (types.ToolResult, bool, error) {
 	if registry == nil {
 		result := types.ErrorToolResult("tool registry is not configured")
-		if _, err := s.bus.Publish(ctx, types.NewToolCallCompletedEvent(
-			time.Now().UTC(), call, result)); err != nil {
-			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
+		if err := s.publishToolCallCompleted(ctx, call, result); err != nil {
+			return types.ToolResult{}, false, err
 		}
-		return result, nil
+		return result, true, nil
 	}
 
 	tool, ok := registry.Get(call.Name)
 	if !ok {
 		result := types.ErrorToolResult(fmt.Sprintf("tool %q not found", call.Name))
-		if _, err := s.bus.Publish(ctx, types.NewToolCallCompletedEvent(
-			time.Now().UTC(), call, result)); err != nil {
-			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
+		if err := s.publishToolCallCompleted(ctx, call, result); err != nil {
+			return types.ToolResult{}, false, err
 		}
-		return result, nil
+		return result, true, nil
 	}
 
 	allowed, deniedResult, err := s.authorizeToolCall(ctx, call, tool)
 	if err != nil {
-		return types.ToolResult{}, err
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			ctx.Err() != nil {
+			result := types.ErrorToolResult("tool call cancelled before approval completed")
+			if err := s.publishToolCallCompleted(ctx, call, result); err != nil {
+				return types.ToolResult{}, false, err
+			}
+			return result, true, nil
+		}
+		return types.ToolResult{}, false, err
 	}
 	if !allowed {
-		if _, err := s.bus.Publish(ctx, types.NewToolCallCompletedEvent(
-			time.Now().UTC(), call, deniedResult)); err != nil {
-			return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
+		if err := s.publishToolCallCompleted(ctx, call, deniedResult); err != nil {
+			return types.ToolResult{}, false, err
 		}
-		return deniedResult, nil
+		return deniedResult, true, nil
 	}
 
 	if _, err := s.bus.Publish(ctx, types.NewToolCallStartedEvent(
 		time.Now().UTC(), call)); err != nil {
-		return types.ToolResult{}, fmt.Errorf("publish tool call started event: %w", err)
+		return types.ToolResult{}, false, fmt.Errorf("publish tool call started event: %w", err)
 	}
 
 	result, err := tool.Run(ctx, call.Input)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			_, _ = s.bus.Publish(ctx, types.NewSessionErrorEvent(time.Now().UTC(), err))
-			return types.ToolResult{}, fmt.Errorf("execute tool %q: %w", call.Name, err)
+			cancelled := types.ErrorToolResult("tool call cancelled")
+			if err := s.publishToolCallCompleted(ctx, call, cancelled); err != nil {
+				return types.ToolResult{}, false, err
+			}
+			return cancelled, true, nil
 		}
 		errorResult := types.ErrorToolResult(err.Error())
 		result = &errorResult
@@ -400,12 +411,20 @@ func (s *Session) executeToolCall(ctx context.Context, call types.ToolCall,
 		result = &types.ToolResult{}
 	}
 
-	if _, err := s.bus.Publish(ctx, types.NewToolCallCompletedEvent(
-		time.Now().UTC(), call, *result)); err != nil {
-		return types.ToolResult{}, fmt.Errorf("publish tool call completed event: %w", err)
+	if err := s.publishToolCallCompleted(ctx, call, *result); err != nil {
+		return types.ToolResult{}, false, err
 	}
 
-	return *result, nil
+	return *result, false, nil
+}
+
+func (s *Session) publishToolCallCompleted(ctx context.Context, call types.ToolCall,
+	result types.ToolResult) error {
+	if _, err := s.bus.Publish(context.WithoutCancel(ctx), types.NewToolCallCompletedEvent(
+		time.Now().UTC(), call, result)); err != nil {
+		return fmt.Errorf("publish tool call completed event: %w", err)
+	}
+	return nil
 }
 
 func (s *Session) authorizeToolCall(ctx context.Context, call types.ToolCall,
