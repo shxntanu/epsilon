@@ -2,10 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
+
+var diffHunkRangePattern = regexp.MustCompile(`@@ -([0-9]+)(?:,[0-9]+)? \+([0-9]+)(?:,[0-9]+)? @@`)
 
 func (m model) renderToolDetails(entry transcriptEntry, prefix string) string {
 	lines := make([]string, 0, 4)
@@ -67,6 +71,13 @@ func (m model) renderToolEntry(entry transcriptEntry) string {
 
 	body := strings.Join(lines, "\n")
 	return m.styles.toolBlock.Render(body)
+}
+
+func shouldCollapseDiffToolEntry(entry transcriptEntry, showEvents bool) bool {
+	if showEvents || entry.toolActive || entry.toolError {
+		return false
+	}
+	return strings.TrimSpace(entry.toolMeta["diff"]) != ""
 }
 
 func (m model) renderToolGroupEntry(entry transcriptEntry) string {
@@ -138,37 +149,195 @@ func renderToolGroupSummary(entry transcriptEntry) string {
 }
 
 func (m model) renderDiff(diff string) string {
-	body := m.renderDiffBody(diff)
-	if m.density == densityCompact {
-		return m.styles.tool.Render("Changes") + "\n" + body
+	summary := summarizeDiff(diff)
+	title := m.renderDiffTitle(summary)
+	body := m.renderDiffBody(diff, summary)
+	if body == "" {
+		return title
 	}
 
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.styles.tool.Render("Changes"),
-		m.styles.diffBlock.Width(m.messageWidth()).Render(body),
-	)
+	return lipgloss.JoinVertical(lipgloss.Left, title, body)
 }
 
-func (m model) renderDiffBody(diff string) string {
+type diffSummary struct {
+	path    string
+	added   int
+	removed int
+}
+
+func summarizeDiff(diff string) diffSummary {
+	summary := diffSummary{path: "changes"}
+	for _, line := range strings.Split(strings.TrimRight(diff, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++ "):
+			if path := cleanDiffPath(strings.TrimSpace(strings.TrimPrefix(line, "+++ "))); path != "" &&
+				path != "/dev/null" {
+				summary.path = path
+			}
+		case strings.HasPrefix(line, "--- "):
+			if summary.path == "changes" {
+				if path := cleanDiffPath(strings.TrimSpace(strings.TrimPrefix(line, "--- "))); path != "" &&
+					path != "/dev/null" {
+					summary.path = path
+				}
+			}
+		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+			summary.added++
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			summary.removed++
+		}
+	}
+	return summary
+}
+
+func cleanDiffPath(path string) string {
+	path = strings.Trim(path, "\"")
+	path = strings.TrimPrefix(path, "a/")
+	path = strings.TrimPrefix(path, "b/")
+	return path
+}
+
+func (m model) renderDiffTitle(summary diffSummary) string {
+	verb := "Edited"
+	if summary.removed == 0 && summary.added > 0 {
+		verb = "Added"
+	}
+	if summary.added == 0 && summary.removed > 0 {
+		verb = "Deleted"
+	}
+
+	counts := lipgloss.JoinHorizontal(
+		lipgloss.Left,
+		m.styles.diffAdd.Render(fmt.Sprintf("+%d", summary.added)),
+		m.styles.muted.Render(" "),
+		m.styles.diffRemove.Render(fmt.Sprintf("-%d", summary.removed)),
+	)
+	return m.styles.tool.Render("•") + " " +
+		lipgloss.NewStyle().Background(tuiBackground).Foreground(tuiInkStrong).Bold(true).Render(verb) +
+		" " +
+		lipgloss.NewStyle().Background(tuiBackground).Foreground(tuiInk).Render(summary.path) +
+		" " +
+		m.styles.muted.Render("(") + counts + m.styles.muted.Render(")")
+}
+
+func (m model) renderDiffBody(diff string, summary diffSummary) string {
 	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
 	rendered := make([]string, 0, len(lines))
+	oldLine := 1
+	newLine := 1
+	lineNumberWidth := max(3, len(strconv.Itoa(max(1, maxChangedLine(lines)))))
+	rowWidth := max(20, m.messageWidth())
 	for _, line := range lines {
 		switch {
-		case strings.HasPrefix(line, "*** "):
-			rendered = append(rendered, m.styles.diffHeader.Render(line))
+		case strings.HasPrefix(line, "diff --git") ||
+			strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "*** ") ||
+			strings.HasPrefix(line, "+++") ||
+			strings.HasPrefix(line, "---"):
+			continue
 		case strings.HasPrefix(line, "@@"):
-			rendered = append(rendered, m.styles.diffMeta.Render(line))
-		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
-			rendered = append(rendered, m.styles.diffHeader.Render(line))
+			if parsedOld, parsedNew, ok := parseDiffHunkStart(line); ok {
+				oldLine = parsedOld
+				newLine = parsedNew
+			}
+			if strings.TrimSpace(line) != "@@" {
+				rendered = append(rendered, m.styles.diffMeta.Render(line))
+			}
 		case strings.HasPrefix(line, "+"):
-			rendered = append(rendered, m.styles.diffAdd.Render(line))
+			rendered = append(rendered, m.renderDiffRow(newLine, "+", strings.TrimPrefix(line, "+"),
+				lineNumberWidth, rowWidth, true))
+			newLine++
 		case strings.HasPrefix(line, "-"):
-			rendered = append(rendered, m.styles.diffRemove.Render(line))
+			rendered = append(rendered, m.renderDiffRow(oldLine, "-", strings.TrimPrefix(line, "-"),
+				lineNumberWidth, rowWidth, false))
+			oldLine++
+		case strings.HasPrefix(line, `\ No newline at end of file`):
+			rendered = append(rendered, m.styles.diffMeta.Render(line))
 		default:
-			rendered = append(rendered, m.styles.muted.Render(line))
+			text := line
+			if strings.HasPrefix(text, " ") {
+				text = strings.TrimPrefix(text, " ")
+			}
+			rendered = append(rendered, m.renderDiffContextRow(newLine, text, lineNumberWidth, rowWidth))
+			oldLine++
+			newLine++
 		}
 	}
 
+	if len(rendered) == 0 && (summary.added > 0 || summary.removed > 0) {
+		return m.styles.diffMeta.Render("diff omitted")
+	}
 	return strings.Join(rendered, "\n")
+}
+
+func parseDiffHunkStart(line string) (int, int, bool) {
+	matches := diffHunkRangePattern.FindStringSubmatch(line)
+	if len(matches) != 3 {
+		return 0, 0, false
+	}
+	oldLine, oldErr := strconv.Atoi(matches[1])
+	newLine, newErr := strconv.Atoi(matches[2])
+	if oldErr != nil || newErr != nil {
+		return 0, 0, false
+	}
+	return oldLine, newLine, true
+}
+
+func maxChangedLine(lines []string) int {
+	oldLine := 1
+	newLine := 1
+	maxLine := 1
+	for _, line := range lines {
+		if strings.HasPrefix(line, "@@") {
+			if parsedOld, parsedNew, ok := parseDiffHunkStart(line); ok {
+				oldLine = parsedOld
+				newLine = parsedNew
+				maxLine = max(maxLine, max(oldLine, newLine))
+			}
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+			maxLine = max(maxLine, newLine)
+			newLine++
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			maxLine = max(maxLine, oldLine)
+			oldLine++
+		case strings.HasPrefix(line, "diff --git") ||
+			strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "---") ||
+			strings.HasPrefix(line, "+++"):
+			continue
+		default:
+			maxLine = max(maxLine, max(oldLine, newLine))
+			oldLine++
+			newLine++
+		}
+	}
+	return maxLine
+}
+
+func (m model) renderDiffRow(lineNumber int, marker string, text string, numberWidth int, rowWidth int,
+	added bool) string {
+	bg := lipgloss.Color("#12351F")
+	fg := lipgloss.Color("#A7F3B8")
+	markerColor := lipgloss.Color("#3FB950")
+	if !added {
+		bg = lipgloss.Color("#4A1717")
+		fg = lipgloss.Color("#FFD0CC")
+		markerColor = lipgloss.Color("#FF7B72")
+	}
+	number := fmt.Sprintf("%*d", numberWidth, lineNumber)
+	content := lipgloss.NewStyle().Background(bg).Foreground(tuiMuted).Render(number) +
+		" " +
+		lipgloss.NewStyle().Background(bg).Foreground(markerColor).Bold(true).Render(marker) +
+		" " +
+		lipgloss.NewStyle().Background(bg).Foreground(fg).Render(text)
+	return lipgloss.NewStyle().Background(bg).Width(rowWidth).Render(content)
+}
+
+func (m model) renderDiffContextRow(lineNumber int, text string, numberWidth int, rowWidth int) string {
+	number := fmt.Sprintf("%*d", numberWidth, lineNumber)
+	content := m.styles.muted.Render(number) + "   " + m.styles.muted.Render(text)
+	return lipgloss.NewStyle().Background(tuiBackground).Width(rowWidth).Render(content)
 }

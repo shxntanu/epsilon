@@ -1590,6 +1590,9 @@ func (m model) renderTranscriptEntry(entry transcriptEntry) (string, bool) {
 	case transcriptStatus:
 		return m.renderStatusEntry(entry), true
 	case transcriptTool:
+		if shouldCollapseDiffToolEntry(entry, m.showEvents) {
+			return "", false
+		}
 		return m.renderToolEntry(entry), true
 	case transcriptToolGroup:
 		return m.renderToolGroupEntry(entry), true

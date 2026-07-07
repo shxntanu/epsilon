@@ -92,6 +92,16 @@ func (t *PatchTool) Run(ctx context.Context, input json.RawMessage) (*types.Tool
 		return &res, nil
 	}
 
+	var before []byte
+	existed := false
+	if data, err := os.ReadFile(targetPath); err == nil {
+		before = data
+		existed = true
+	} else if !os.IsNotExist(err) {
+		res := types.ErrorToolResult(fmt.Sprintf("Unable to read target before patching: %v", err))
+		return &res, nil
+	}
+
 	// Execute execution phase
 	err = t.executePatch(targetPath, instruction)
 	if err != nil {
@@ -104,6 +114,11 @@ func (t *PatchTool) Run(ctx context.Context, input json.RawMessage) (*types.Tool
 	result.Metadata = map[string]string{
 		"status":        "patched",
 		"modified_file": instruction.Path,
+	}
+	if after, err := os.ReadFile(targetPath); err == nil {
+		if diff := writeFileDiff(instruction.Path, before, after, existed); diff != "" {
+			result.Metadata["diff"] = diff
+		}
 	}
 
 	return &result, nil
