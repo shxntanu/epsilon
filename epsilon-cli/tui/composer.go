@@ -87,6 +87,9 @@ func (c composer) Update(msg tea.Msg) (composer, tea.Cmd) {
 			c.input, cmd = c.input.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			return c, cmd
 		}
+		if c.handleCommandBackspace(key) {
+			return c, nil
+		}
 		if c.handleCommandArrow(key) {
 			return c, nil
 		}
@@ -118,6 +121,25 @@ func (c *composer) handleCommandArrow(key tea.KeyPressMsg) bool {
 		key.Keystroke() == "cmd+right",
 		key.Keystroke() == "super+right":
 		c.input.CursorEnd()
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *composer) handleCommandBackspace(key tea.KeyPressMsg) bool {
+	switch {
+	case key.Code == tea.KeyBackspace && key.Mod&tea.ModMeta != 0,
+		key.Keystroke() == "meta+backspace",
+		key.Keystroke() == "cmd+backspace",
+		key.Keystroke() == "super+backspace",
+		key.Keystroke() == "ctrl+u":
+		column := c.input.Column()
+		for range column {
+			var cmd tea.Cmd
+			c.input, cmd = c.input.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+			_ = cmd
+		}
 		return true
 	default:
 		return false
