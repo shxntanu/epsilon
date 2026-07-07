@@ -113,6 +113,7 @@ Type `/` in the composer to open the fuzzy command selector. Use up/down to move
 | `/model [name]`                             | Pick a model from the provider or set one manually. |
 | `/effort [minimal\|low\|medium\|high\|off]` | Show, set, or clear model effort.                   |
 | `/resume [session-id]`                      | Pick or resume a persisted chat inside the TUI.     |
+| `/skills refresh`                           | Rescan project and global skill folders.            |
 | `/status`                                   | Show session and TUI state.                         |
 | `/exit`                                     | Quit epsilon.                                       |
 

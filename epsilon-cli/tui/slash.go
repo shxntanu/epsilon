@@ -118,6 +118,20 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 			m.sessionTitle = title
 		}
 		m.appendPlain(m.styles.muted.Render("renamed current session: " + title))
+	case slash.ActionRefreshSkills:
+		if m.refreshSkills == nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render("skill refresh is not available"))
+			return nil
+		}
+		count, err := m.refreshSkills()
+		m.status = "skills:refreshed"
+		if err != nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render(err.Error()))
+			return nil
+		}
+		m.appendSlashMessage(fmt.Sprintf("refreshed %d skills", count))
 	case slash.ActionQuit:
 		return quitCmd()
 	default:

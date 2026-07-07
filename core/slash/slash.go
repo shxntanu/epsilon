@@ -24,6 +24,7 @@ const (
 	ActionPickSession     Action = "pick_session"
 	ActionRenameSession   Action = "rename_session"
 	ActionResumeChat      Action = "resume_chat"
+	ActionRefreshSkills   Action = "refresh_skills"
 	ActionQuit            Action = "quit"
 )
 
@@ -229,6 +230,24 @@ func NewDefaultRegistry() *Registry {
 				Session: sessionID,
 				Message: "resuming " + sessionID,
 			}, nil
+		},
+	})
+	registry.Register(Command{
+		Name:        "skills",
+		Aliases:     []string{"skill"},
+		Usage:       "/skills refresh",
+		Description: "refresh installed skills",
+		Handler: func(_ context.Context, exec Execution) (Result, error) {
+			args := strings.ToLower(strings.TrimSpace(exec.Args))
+			switch args {
+			case "", "refresh", "reload", "rescan":
+				return Result{
+					Action:  ActionRefreshSkills,
+					Message: "refreshing skills",
+				}, nil
+			default:
+				return Result{}, fmt.Errorf("usage: /skills refresh")
+			}
 		},
 	})
 	registry.Register(Command{

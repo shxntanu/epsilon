@@ -43,6 +43,7 @@ type Harness struct {
 	skillRegistry    *skills.Registry
 	activeSkill      *skills.Skill
 	agentsMD         string
+	workspaceRoot    string
 }
 
 const defaultEventBufferSize = 64
@@ -329,6 +330,39 @@ func (h *Harness) Skills() []skills.Skill {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.skillRegistry.Skills()
+}
+
+func (h *Harness) RefreshSkills() (int, error) {
+	h.mu.Lock()
+	workspaceRoot := h.workspaceRoot
+	activeName := ""
+	if h.activeSkill != nil {
+		activeName = h.activeSkill.Name
+	}
+	h.mu.Unlock()
+
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return 0, fmt.Errorf("workspace context is not loaded")
+	}
+
+	registry, err := skills.LoadRegistry(workspaceRoot)
+	if err != nil {
+		return 0, fmt.Errorf("load skills registry: %w", err)
+	}
+
+	var active *skills.Skill
+	if activeName != "" {
+		if skill, ok := registry.Get(activeName); ok {
+			active = &skill
+		}
+	}
+
+	h.mu.Lock()
+	h.skillRegistry = registry
+	h.activeSkill = active
+	count := registry.Len()
+	h.mu.Unlock()
+	return count, nil
 }
 
 func (h *Harness) ActiveSkill() *skills.Skill {

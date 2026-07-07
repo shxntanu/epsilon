@@ -38,6 +38,7 @@ type providerState struct {
 	suggestSkill   func(string) *skills.Skill
 	currentSkill   func() *skills.Skill
 	listSkills     func() []skills.Skill
+	refreshSkills  func() (int, error)
 }
 
 type inputState struct {

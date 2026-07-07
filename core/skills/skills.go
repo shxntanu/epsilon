@@ -38,37 +38,41 @@ func LoadRegistry(workspaceRoot string) (*Registry, error) {
 		return nil, fmt.Errorf("resolve workspace root: %w", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(root, "skills-lock.json"))
+	lock, err := loadLockfile(root)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return NewRegistry(nil), nil
+		return nil, err
+	}
+
+	loaded := make(map[string]Skill)
+	for _, source := range registrySources(root, lock) {
+		for _, path := range discoverSkillPaths(source.Root) {
+			name := skillNameFromPath(source.Root, path)
+			if source.Kind == "lockfile" {
+				name = source.Name
+			}
+			skill, err := loadSkillFile(path, name, source.Source)
+			if err != nil {
+				log.Printf("epsilon: warning: skip skill %q: %v", name, err)
+				continue
+			}
+			if _, exists := loaded[skill.Name]; exists {
+				continue
+			}
+			loaded[skill.Name] = skill
 		}
-		return nil, fmt.Errorf("read skills-lock.json: %w", err)
 	}
 
-	var lock lockfile
-	if err := json.Unmarshal(data, &lock); err != nil {
-		return nil, fmt.Errorf("parse skills-lock.json: %w", err)
-	}
-
-	names := make([]string, 0, len(lock.Skills))
-	for name := range lock.Skills {
+	names := make([]string, 0, len(loaded))
+	for name := range loaded {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	loaded := make([]Skill, 0, len(names))
+	skillList := make([]Skill, 0, len(names))
 	for _, name := range names {
-		spec := lock.Skills[name]
-		skill, err := loadSkill(root, name, spec)
-		if err != nil {
-			log.Printf("epsilon: warning: skip skill %q: %v", name, err)
-			continue
-		}
-		loaded = append(loaded, skill)
+		skillList = append(skillList, loaded[name])
 	}
-
-	return NewRegistry(loaded), nil
+	return NewRegistry(skillList), nil
 }
 
 func NewRegistry(skillList []Skill) *Registry {
@@ -104,14 +108,127 @@ func (r *Registry) Len() int {
 	return len(r.skills)
 }
 
-func loadSkill(workspaceRoot string, name string, spec lockedSkill) (Skill, error) {
+type registrySource struct {
+	Kind   string
+	Root   string
+	Name   string
+	Source string
+}
+
+func loadLockfile(root string) (lockfile, error) {
+	data, err := os.ReadFile(filepath.Join(root, "skills-lock.json"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return lockfile{}, nil
+		}
+		return lockfile{}, fmt.Errorf("read skills-lock.json: %w", err)
+	}
+
+	var lock lockfile
+	if err := json.Unmarshal(data, &lock); err != nil {
+		return lockfile{}, fmt.Errorf("parse skills-lock.json: %w", err)
+	}
+	return lock, nil
+}
+
+func registrySources(workspaceRoot string, lock lockfile) []registrySource {
+	sources := make([]registrySource, 0, len(lock.Skills)+2)
+
+	names := make([]string, 0, len(lock.Skills))
+	for name := range lock.Skills {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		spec := lock.Skills[name]
+		path, err := resolveSkillPath(workspaceRoot, spec.SkillPath)
+		if err != nil {
+			log.Printf("epsilon: warning: skip skill %q: %v", name, err)
+			continue
+		}
+		sources = append(sources, registrySource{
+			Kind:   "lockfile",
+			Root:   path,
+			Name:   name,
+			Source: strings.TrimSpace(spec.Source),
+		})
+	}
+
+	sources = append(sources, registrySource{
+		Kind:   "project",
+		Root:   filepath.Join(workspaceRoot, ".agents", "skills"),
+		Source: "project .agents/skills",
+	})
+	sources = append(sources, registrySource{
+		Kind:   "project",
+		Root:   filepath.Join(workspaceRoot, ".agents"),
+		Source: "project .agents",
+	})
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		sources = append(sources, registrySource{
+			Kind:   "global",
+			Root:   filepath.Join(home, ".agents", "skills"),
+			Source: "global ~/.agents/skills",
+		})
+		sources = append(sources, registrySource{
+			Kind:   "global",
+			Root:   filepath.Join(home, ".agents"),
+			Source: "global ~/.agents",
+		})
+	}
+	return sources
+}
+
+func discoverSkillPaths(root string) []string {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil
+	}
+	if strings.EqualFold(filepath.Base(root), "SKILL.md") {
+		if _, err := os.Stat(root); err == nil {
+			return []string{root}
+		}
+		return nil
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("epsilon: warning: scan skills %q: %v", root, err)
+		}
+		return nil
+	}
+
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(root, entry.Name(), "SKILL.md")
+		if _, err := os.Stat(path); err == nil {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func skillNameFromPath(root string, path string) string {
+	name := filepath.Base(filepath.Dir(path))
+	if rel, err := filepath.Rel(root, path); err == nil && rel != "." &&
+		!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+		first, _, _ := strings.Cut(rel, string(filepath.Separator))
+		if first != "" && first != "SKILL.md" {
+			name = first
+		}
+	}
+	return name
+}
+
+func loadSkillFile(path string, name string, source string) (Skill, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return Skill{}, fmt.Errorf("skill name is empty")
-	}
-	path, err := resolveSkillPath(workspaceRoot, spec.SkillPath)
-	if err != nil {
-		return Skill{}, err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -120,11 +237,11 @@ func loadSkill(workspaceRoot string, name string, spec lockedSkill) (Skill, erro
 	content := strings.TrimSpace(string(data))
 	description := parseFrontmatterDescription(content)
 	if strings.TrimSpace(description) == "" {
-		description = strings.TrimSpace(spec.Source)
+		description = strings.TrimSpace(source)
 	}
 	return Skill{
 		Name:        name,
-		Source:      strings.TrimSpace(spec.Source),
+		Source:      strings.TrimSpace(source),
 		Description: description,
 		Content:     content,
 		Path:        path,

@@ -70,7 +70,8 @@ func Start(ctx context.Context, config Config) error {
 		config.Harness.SetModel, config.Harness.SetEffort,
 		config.Harness.RenameSession, config.Harness.SetActiveSkill,
 		config.Harness.ClearActiveSkill, config.Harness.SuggestSkill,
-		config.Harness.ActiveSkill, config.Harness.Skills, initialHistory),
+		config.Harness.ActiveSkill, config.Harness.Skills,
+		config.Harness.RefreshSkills, initialHistory),
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -220,7 +221,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	renameSession func(context.Context, string, string) (bool, error),
 	setActiveSkill func(string) error, clearSkill func(),
 	suggestSkill func(string) *skills.Skill, currentSkill func() *skills.Skill,
-	listSkills func() []skills.Skill,
+	listSkills func() []skills.Skill, refreshSkills func() (int, error),
 	initialHistory []types.Event) model {
 	vp := viewport.New()
 	vp.SoftWrap = true
@@ -364,6 +365,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			suggestSkill:   suggestSkill,
 			currentSkill:   currentSkill,
 			listSkills:     listSkills,
+			refreshSkills:  refreshSkills,
 		},
 		inputState: inputState{
 			composer:  newComposer(),
@@ -557,10 +559,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitArmed = false
 			m.viewport.PageDown()
 			m.followOutput = m.viewport.AtBottom()
-		case "ctrl+up", "ctrl+u":
+		case "ctrl+up":
 			m.quitArmed = false
 			m.viewport.HalfPageUp()
 			m.followOutput = false
+		case "ctrl+u":
+			m.quitArmed = false
+			var cmd tea.Cmd
+			m.composer, cmd = m.composer.Update(msg)
+			cmds = append(cmds, cmd)
+			m.resize()
 		case "ctrl+down", "ctrl+d":
 			m.quitArmed = false
 			m.viewport.HalfPageDown()
