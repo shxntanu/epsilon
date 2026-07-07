@@ -236,7 +236,7 @@ func (c composer) inputView(skillPrefix string) string {
 	highlighted := lipgloss.NewStyle().
 		Background(tuiBackground).
 		Foreground(tuiAccentTool).
-		Render("$" + skillPrefix)
+		Render("!" + skillPrefix)
 	return replaceVisibleText(view, plainPrefix, highlighted)
 }
 
