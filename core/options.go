@@ -84,7 +84,16 @@ func WithRuntimeSettings(settings harnessconfig.Settings) Option {
 		h.configSettings = settings
 		h.model = settings.Model
 		h.effort = settings.Effort
+		h.planMode = settings.PlanMode
 		h.systemPrompt = settings.SystemPrompt
+		return nil
+	}
+}
+
+func WithPlanMode(enabled bool) Option {
+	return func(h *Harness) error {
+		h.planMode = enabled
+		h.configSettings.PlanMode = enabled
 		return nil
 	}
 }

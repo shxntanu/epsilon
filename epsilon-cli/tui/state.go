@@ -23,22 +23,24 @@ type appState struct {
 }
 
 type providerState struct {
-	contextView    func() contextwindow.Summary
-	modelInfo      func() (types.ModelInfo, bool)
-	listModels     func(context.Context) ([]types.ModelInfo, error)
-	listSessions   func(context.Context) ([]events.SessionInfo, error)
-	resumeSession  func(context.Context, string) (*session.Session, error)
-	currentModel   func() string
-	currentEffort  func() string
-	setModel       func(context.Context, string) error
-	setEffort      func(string) error
-	renameSession  func(context.Context, string, string) (bool, error)
-	setActiveSkill func(string) error
-	clearSkill     func()
-	suggestSkill   func(string) *skills.Skill
-	currentSkill   func() *skills.Skill
-	listSkills     func() []skills.Skill
-	refreshSkills  func() (int, error)
+	contextView     func() contextwindow.Summary
+	modelInfo       func() (types.ModelInfo, bool)
+	listModels      func(context.Context) ([]types.ModelInfo, error)
+	listSessions    func(context.Context) ([]events.SessionInfo, error)
+	resumeSession   func(context.Context, string) (*session.Session, error)
+	currentModel    func() string
+	currentEffort   func() string
+	currentPlanMode func() bool
+	setModel        func(context.Context, string) error
+	setEffort       func(string) error
+	setPlanMode     func(bool) error
+	renameSession   func(context.Context, string, string) (bool, error)
+	setActiveSkill  func(string) error
+	clearSkill      func()
+	suggestSkill    func(string) *skills.Skill
+	currentSkill    func() *skills.Skill
+	listSkills      func() []skills.Skill
+	refreshSkills   func() (int, error)
 }
 
 type inputState struct {

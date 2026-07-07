@@ -89,6 +89,19 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		}
 		m.status = "effort:" + statusEffort
 		m.appendSlashMessage(result.Message)
+	case slash.ActionSetPlanMode:
+		if m.setPlanMode == nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render("plan mode changes are not available"))
+			return nil
+		}
+		if err := m.setPlanMode(result.Bool); err != nil {
+			m.status = "ready"
+			m.appendPlain(m.styles.error.Render(err.Error()))
+			return nil
+		}
+		m.status = "plan:" + onOff(currentBool(m.currentPlanMode))
+		m.appendSlashMessage(result.Message)
 	case slash.ActionResumeChat:
 		return m.resumeChat(events.SessionInfo{ID: result.Session})
 	case slash.ActionRenameSession:
@@ -162,6 +175,7 @@ func (m model) slashExecution() slash.Execution {
 			MessageCount:     len(m.session.Messages()),
 			Model:            currentString(m.currentModel),
 			Effort:           currentString(m.currentEffort),
+			PlanMode:         currentBool(m.currentPlanMode),
 		},
 	}
 }
@@ -171,6 +185,10 @@ func currentString(fn func() string) string {
 		return ""
 	}
 	return fn()
+}
+
+func currentBool(fn func() bool) bool {
+	return fn != nil && fn()
 }
 
 func slashDensity(density densityMode) slash.Density {

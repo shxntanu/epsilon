@@ -31,6 +31,7 @@ type Settings struct {
 	Model           string `json:"model,omitempty"`
 	Effort          string `json:"effort,omitempty"`
 	SystemPrompt    string `json:"system_prompt,omitempty"`
+	PlanMode        bool   `json:"plan_mode,omitempty"`
 	LiteLLMBaseURL  string `json:"litellm_base_url,omitempty"`
 	EventBufferSize int    `json:"event_buffer_size,omitempty"`
 }
@@ -93,6 +94,9 @@ func overlaySettings(base Settings, override Settings) Settings {
 	}
 	if strings.TrimSpace(override.SystemPrompt) != "" {
 		base.SystemPrompt = override.SystemPrompt
+	}
+	if override.PlanMode {
+		base.PlanMode = true
 	}
 	if strings.TrimSpace(override.LiteLLMBaseURL) != "" {
 		base.LiteLLMBaseURL = override.LiteLLMBaseURL

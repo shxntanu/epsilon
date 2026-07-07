@@ -576,6 +576,40 @@ func TestRenderBashToolEntryUsesCodexLikeDetailTreatment(t *testing.T) {
 	}
 }
 
+func TestRenderBlockHonorsDetailedTranscriptMode(t *testing.T) {
+	m := model{
+		layoutState: layoutState{
+			width:      80,
+			density:    densityComfortable,
+			showEvents: true,
+		},
+		visualState: visualState{
+			styles: styles{
+				tool:      lipgloss.NewStyle(),
+				error:     lipgloss.NewStyle(),
+				muted:     lipgloss.NewStyle(),
+				toolBlock: lipgloss.NewStyle(),
+			},
+		},
+	}
+	entry := transcriptEntry{
+		kind:       transcriptTool,
+		text:       "Used read_file",
+		toolName:   "read_file",
+		toolInput:  `{"path":"README.md"}`,
+		toolResult: "project docs",
+		toolMeta:   map[string]string{"path": "README.md"},
+	}
+
+	rendered := m.RenderBlock(transcriptEntryToBlock(entry), 80)
+	plain := plainANSI(strings.Join(rendered.Lines, "\n"))
+	for _, want := range []string{"Read README.md", `{"path":"README.md"}`, "project docs"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("detailed block render missing %q:\n%s", want, plain)
+		}
+	}
+}
+
 func TestRenderToolGroupHidesNestedDetailsUntilExpanded(t *testing.T) {
 	m := model{
 		layoutState: layoutState{

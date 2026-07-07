@@ -27,6 +27,7 @@ type harnessConfig struct {
 	model           string
 	effort          string
 	systemPrompt    string
+	planMode        bool
 	litellmBaseURL  string
 	litellmAPIKey   string
 	eventBufferSize int
@@ -81,6 +82,7 @@ func runCommand(ctx context.Context, args []string) error {
 	provider := fs.String("provider", envOrDefault("EPSILON_PROVIDER", defaults.Provider), "provider to use: fake or litellm")
 	model := fs.String("model", envOrDefault("LITELLM_MODEL", defaults.Model), "model name for LiteLLM")
 	effort := fs.String("effort", envOrDefault("EPSILON_MODEL_EFFORT", defaults.Effort), "model reasoning effort")
+	planMode := fs.Bool("plan", defaults.PlanMode, "enable read-only planning mode")
 	systemPrompt := fs.String("system-prompt", envOrDefault("EPSILON_SYSTEM_PROMPT", defaults.SystemPrompt), "additional system prompt text")
 	systemPromptFile := fs.String("system-prompt-file", envOrDefault("EPSILON_SYSTEM_PROMPT_FILE", ""), "path to an additional system prompt file")
 	litellmBaseURL := fs.String("litellm-base-url", envOrDefault("LITELLM_BASE_URL", defaults.LiteLLMBaseURL), "LiteLLM proxy base URL")
@@ -104,6 +106,7 @@ func runCommand(ctx context.Context, args []string) error {
 		provider:        *provider,
 		model:           *model,
 		effort:          *effort,
+		planMode:        *planMode,
 		systemPrompt:    resolvedSystemPrompt,
 		litellmBaseURL:  *litellmBaseURL,
 		litellmAPIKey:   *litellmAPIKey,
@@ -273,6 +276,7 @@ func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error
 			Model:           config.model,
 			Effort:          config.effort,
 			SystemPrompt:    config.systemPrompt,
+			PlanMode:        config.planMode,
 			LiteLLMBaseURL:  config.litellmBaseURL,
 			EventBufferSize: config.eventBufferSize,
 		}),
@@ -301,6 +305,7 @@ func newHarness(ctx context.Context, config harnessConfig) (*core.Harness, error
 			Model:           config.model,
 			Effort:          config.effort,
 			SystemPrompt:    config.systemPrompt,
+			PlanMode:        config.planMode,
 			LiteLLMBaseURL:  config.litellmBaseURL,
 			EventBufferSize: config.eventBufferSize,
 		}); err != nil {

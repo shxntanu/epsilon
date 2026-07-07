@@ -66,7 +66,7 @@ func (t *PatchTool) InputSchema() json.RawMessage {
 }
 
 func (t *PatchTool) Permission() types.PermissionMode {
-	return types.PermissionAsk
+	return types.PermissionAllow
 }
 
 func (t *PatchTool) Run(ctx context.Context, input json.RawMessage) (*types.ToolResult, error) {

@@ -123,6 +123,7 @@ type ModelRequestSettings struct {
 	Model        string `json:"model,omitempty"`
 	Effort       string `json:"effort,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`
+	PlanMode     bool   `json:"plan_mode,omitempty"`
 }
 
 // ModelResponse is the provider-neutral output returned by an LLM provider.

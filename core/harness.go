@@ -34,6 +34,7 @@ type Harness struct {
 	selectedModel    *types.ModelInfo
 	model            string
 	effort           string
+	planMode         bool
 	promptCatalog    *prompts.Catalog
 	systemPrompt     string
 	permissionBroker permissions.Broker
@@ -269,6 +270,12 @@ func (h *Harness) CurrentEffort() string {
 	return h.effort
 }
 
+func (h *Harness) CurrentPlanMode() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.planMode
+}
+
 func (h *Harness) CurrentSystemPrompt() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -305,6 +312,15 @@ func (h *Harness) SetEffort(effort string) error {
 	return h.saveSessionDefaults()
 }
 
+func (h *Harness) SetPlanMode(enabled bool) error {
+	h.mu.Lock()
+	h.planMode = enabled
+	h.configSettings.PlanMode = enabled
+	h.mu.Unlock()
+
+	return h.saveSessionDefaults()
+}
+
 func (h *Harness) SetSystemPrompt(prompt string) error {
 	prompt = strings.TrimSpace(prompt)
 
@@ -323,6 +339,7 @@ func (h *Harness) modelRequestSettings() types.ModelRequestSettings {
 		Model:        h.model,
 		Effort:       h.effort,
 		SystemPrompt: h.renderAgentPromptLocked(),
+		PlanMode:     h.planMode,
 	}
 }
 

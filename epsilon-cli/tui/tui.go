@@ -70,8 +70,8 @@ func Start(ctx context.Context, config Config) error {
 	model := newModel(ctx, sess, sub, config.PermissionBroker,
 		config.Harness.SlashCommands(), contextSummary, selectedModel,
 		config.Harness.ListModels, config.Harness.ListSessions, config.Harness.ResumeSession,
-		config.Harness.CurrentModel, config.Harness.CurrentEffort,
-		config.Harness.SetModel, config.Harness.SetEffort,
+		config.Harness.CurrentModel, config.Harness.CurrentEffort, config.Harness.CurrentPlanMode,
+		config.Harness.SetModel, config.Harness.SetEffort, config.Harness.SetPlanMode,
 		config.Harness.RenameSession, config.Harness.SetActiveSkill,
 		config.Harness.ClearActiveSkill, config.Harness.SuggestSkill,
 		config.Harness.ActiveSkill, config.Harness.Skills,
@@ -222,8 +222,9 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	listModels func(context.Context) ([]types.ModelInfo, error),
 	listSessions func(context.Context) ([]events.SessionInfo, error),
 	resumeSession func(context.Context, string) (*session.Session, error),
-	currentModel func() string, currentEffort func() string,
+	currentModel func() string, currentEffort func() string, currentPlanMode func() bool,
 	setModel func(context.Context, string) error, setEffort func(string) error,
+	setPlanMode func(bool) error,
 	renameSession func(context.Context, string, string) (bool, error),
 	setActiveSkill func(string) error, clearSkill func(),
 	suggestSkill func(string) *skills.Skill, currentSkill func() *skills.Skill,
@@ -354,22 +355,24 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			broker:       broker,
 		},
 		providerState: providerState{
-			contextView:    contextSummary,
-			modelInfo:      selectedModel,
-			listModels:     listModels,
-			listSessions:   listSessions,
-			resumeSession:  resumeSession,
-			currentModel:   currentModel,
-			currentEffort:  currentEffort,
-			setModel:       setModel,
-			setEffort:      setEffort,
-			renameSession:  renameSession,
-			setActiveSkill: setActiveSkill,
-			clearSkill:     clearSkill,
-			suggestSkill:   suggestSkill,
-			currentSkill:   currentSkill,
-			listSkills:     listSkills,
-			refreshSkills:  refreshSkills,
+			contextView:     contextSummary,
+			modelInfo:       selectedModel,
+			listModels:      listModels,
+			listSessions:    listSessions,
+			resumeSession:   resumeSession,
+			currentModel:    currentModel,
+			currentEffort:   currentEffort,
+			currentPlanMode: currentPlanMode,
+			setModel:        setModel,
+			setEffort:       setEffort,
+			setPlanMode:     setPlanMode,
+			renameSession:   renameSession,
+			setActiveSkill:  setActiveSkill,
+			clearSkill:      clearSkill,
+			suggestSkill:    suggestSkill,
+			currentSkill:    currentSkill,
+			listSkills:      listSkills,
+			refreshSkills:   refreshSkills,
 		},
 		inputState: inputState{
 			composer:  newComposer(),
@@ -1499,10 +1502,9 @@ func (m model) renderScrollbackBlocks(blocks []render.Block) string {
 
 func (m model) RenderBlock(block render.Block, width int) render.RenderedBlock {
 	entry := blockToTranscriptEntry(block)
-	collapsed := m
-	collapsed.showEvents = false
-	collapsed.width = width
-	line, ok := collapsed.renderTranscriptEntry(entry)
+	renderer := m
+	renderer.width = width
+	line, ok := renderer.renderTranscriptEntry(entry)
 	if !ok || line == "" {
 		return render.RenderedBlock{ID: block.ID}
 	}

@@ -21,6 +21,7 @@ const (
 	ActionPickModel       Action = "pick_model"
 	ActionSetModel        Action = "set_model"
 	ActionSetEffort       Action = "set_effort"
+	ActionSetPlanMode     Action = "set_plan_mode"
 	ActionPickSession     Action = "pick_session"
 	ActionRenameSession   Action = "rename_session"
 	ActionResumeChat      Action = "resume_chat"
@@ -61,6 +62,7 @@ type State struct {
 	MessageCount     int
 	Model            string
 	Effort           string
+	PlanMode         bool
 }
 
 type Result struct {
@@ -213,6 +215,23 @@ func NewDefaultRegistry() *Registry {
 				Action:  ActionSetEffort,
 				Effort:  effort,
 				Message: "effort " + effort,
+			}, nil
+		},
+	})
+	registry.Register(Command{
+		Name:        "plan",
+		Aliases:     []string{"planning"},
+		Usage:       "/plan [on|off|toggle]",
+		Description: "toggle read-only planning mode",
+		Handler: func(_ context.Context, exec Execution) (Result, error) {
+			value, err := parseToggle(exec.Args, exec.State.PlanMode, "plan")
+			if err != nil {
+				return Result{}, err
+			}
+			return Result{
+				Action:  ActionSetPlanMode,
+				Bool:    value,
+				Message: "plan mode " + onOff(value),
 			}, nil
 		},
 	})
@@ -561,6 +580,7 @@ func renderStatus(exec Execution) string {
 		"details: " + onOff(exec.State.EventsVisible),
 		"density: " + string(exec.State.Density),
 		"background: " + onOff(exec.State.Background),
+		"plan: " + onOff(exec.State.PlanMode),
 		"model: " + model,
 		"effort: " + effort,
 		fmt.Sprintf("messages: %d", exec.State.MessageCount),

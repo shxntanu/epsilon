@@ -223,7 +223,10 @@ func (s *Session) Step(ctx context.Context) error {
 		}
 
 		requestSettings := s.currentRequestSettings()
-		messages = messagesWithSystemPrompt(requestSettings.SystemPrompt, messages)
+		if requestSettings.PlanMode {
+			toolDefs = planModeToolDefinitions(toolDefs)
+		}
+		messages = messagesWithSystemPrompt(systemPromptForMode(requestSettings), messages)
 		resp, err := s.respond(ctx, provider, types.ModelRequest{
 			Model:    requestSettings.Model,
 			Effort:   requestSettings.Effort,
@@ -297,6 +300,43 @@ func messagesWithSystemPrompt(prompt string, messages []types.Message) []types.M
 	return withPrompt
 }
 
+func systemPromptForMode(settings types.ModelRequestSettings) string {
+	prompt := strings.TrimSpace(settings.SystemPrompt)
+	if !settings.PlanMode {
+		return prompt
+	}
+	return strings.TrimSpace(strings.Join([]string{prompt, planModeSystemPrompt}, "\n\n"))
+}
+
+const planModeSystemPrompt = `Plan mode is active.
+
+You are planning only. You may inspect the workspace using read-only tools, but you must not modify files, run commands, apply patches, install packages, commit changes, or perform any other mutating action.
+
+Produce a concise implementation plan before coding. Include the files or areas you expect to change, the approach, risks or open questions, and verification steps. End by asking for approval to implement. Do not proceed with implementation until the user explicitly approves or switches out of plan mode.`
+
+func planModeToolDefinitions(defs []types.ToolDefinition) []types.ToolDefinition {
+	if len(defs) == 0 {
+		return defs
+	}
+
+	filtered := make([]types.ToolDefinition, 0, len(defs))
+	for _, def := range defs {
+		if planModeAllowsTool(def.Name) {
+			filtered = append(filtered, def)
+		}
+	}
+	return filtered
+}
+
+func planModeAllowsTool(name string) bool {
+	switch name {
+	case "read_file", "list_dir", "file_tree", "grep_search", "ripgrep", "git_status", "git_diff":
+		return true
+	default:
+		return false
+	}
+}
+
 func usagePointer(usage types.Usage) *types.Usage {
 	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.TotalTokens == 0 {
 		return nil
@@ -365,6 +405,13 @@ func (s *Session) executeToolCall(ctx context.Context, call types.ToolCall,
 	tool, ok := registry.Get(call.Name)
 	if !ok {
 		result := types.ErrorToolResult(fmt.Sprintf("tool %q not found", call.Name))
+		if err := s.publishToolCallCompleted(ctx, call, result); err != nil {
+			return types.ToolResult{}, false, err
+		}
+		return result, true, nil
+	}
+	if s.currentRequestSettings().PlanMode && !planModeAllowsTool(call.Name) {
+		result := types.ErrorToolResult("tool denied because plan mode is active")
 		if err := s.publishToolCallCompleted(ctx, call, result); err != nil {
 			return types.ToolResult{}, false, err
 		}
