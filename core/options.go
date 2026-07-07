@@ -130,6 +130,7 @@ func WithWorkspaceContext(workspaceRoot string) Option {
 
 		h.agentsMD = agentsMD
 		h.skillRegistry = registry
+		h.workspaceRoot = workspaceRoot
 		return nil
 	}
 }

@@ -20,12 +20,6 @@ const (
 	defaultBashMaxBytes  = 32 * 1024
 )
 
-var bannedBashCommands = []string{
-	"alias", "curl", "curlie", "wget", "axel", "aria2c",
-	"nc", "telnet", "lynx", "w3m", "links", "httpie", "xh",
-	"http-prompt", "chrome", "firefox", "safari",
-}
-
 type bashInput struct {
 	Command   string `json:"command"`
 	Timeout   int    `json:"timeout,omitempty"`
@@ -61,13 +55,14 @@ Security and correctness rules:
 - Use dedicated tools for workspace inspection when possible: list_dir/file_tree, grep_search, read_file, git_status, and git_diff.
 - Use bash for tests, builds, package-manager commands, and user-requested shell commands.
 - Before creating files or directories, verify the parent location with a dedicated read/list tool.
-- Quote paths and arguments carefully. Avoid command strings that rely on ambiguous shell expansion.
+- Quote paths and arguments carefully. Commands are parsed before execution and only simple commands joined by |, &&, ||, or ; are allowed.
 - Do not use interactive commands or commands that require an editor; GIT_EDITOR is set to true.
-- Do not use network/browser commands. These base commands are blocked: %s.
+- Read-only network exploration is allowed with curl/wget/httpie-style clients, but request bodies, file downloads, uploads, raw sockets, browsers, redirection, variable expansion, command substitution, and subshells are blocked.
+- Absolute filesystem paths and .. traversal arguments are blocked; keep file access inside the workspace.
 - Avoid changing directories; commands already run from the workspace root. If needed, prefer scoped commands such as "go test ./core/tools".
 - Commands are not persistent: environment changes and cd do not carry to later bash calls.
 - Output is truncated after %d bytes for stdout and stderr independently.
-- timeout is optional, uses milliseconds, defaults to %d, and is capped at %d.`, strings.Join(bannedBashCommands, ", "),
+- timeout is optional, uses milliseconds, defaults to %d, and is capped at %d.`,
 		defaultBashMaxBytes, defaultBashTimeoutMs, maxBashTimeoutMs)
 }
 
@@ -95,12 +90,15 @@ func (t *BashTool) Run(ctx context.Context, input json.RawMessage) (*types.ToolR
 	if strings.ContainsRune(command, 0) {
 		return nil, fmt.Errorf("command cannot contain NUL bytes")
 	}
-	if banned, ok := bannedBashCommand(command); ok {
-		result := types.ErrorToolResult(fmt.Sprintf("command %q is not allowed", banned))
+	policy := classifyShellCommand(command)
+	if !policy.Allowed {
+		result := types.ErrorToolResult("command is not allowed: " + policy.Reason)
 		result.Metadata = map[string]string{
 			"workspace": t.workspace.Root(),
 			"command":   command,
 			"blocked":   "true",
+			"reason":    policy.Reason,
+			"bases":     strings.Join(policy.Bases, ","),
 		}
 		return &result, nil
 	}
@@ -154,23 +152,10 @@ func (t *BashTool) Run(ctx context.Context, input json.RawMessage) (*types.ToolR
 		"duration_ms":      fmt.Sprintf("%d", end.Sub(start).Milliseconds()),
 		"stdout_truncated": fmt.Sprintf("%t", stdoutTruncated),
 		"stderr_truncated": fmt.Sprintf("%t", stderrTruncated),
+		"network":          fmt.Sprintf("%t", policy.Network),
+		"bases":            strings.Join(policy.Bases, ","),
 	}
 	return &result, nil
-}
-
-func bannedBashCommand(command string) (string, bool) {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return "", false
-	}
-	base := strings.TrimSpace(fields[0])
-	base = strings.Trim(base, `'"`)
-	for _, banned := range bannedBashCommands {
-		if strings.EqualFold(base, banned) {
-			return banned, true
-		}
-	}
-	return "", false
 }
 
 func formatBashOutput(stdout string, stderr string, exitCode int, timedOut bool) string {

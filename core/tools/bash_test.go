@@ -30,13 +30,13 @@ func TestBashToolRunsCommandInWorkspace(t *testing.T) {
 	}
 }
 
-func TestBashToolBlocksBannedCommand(t *testing.T) {
+func TestBashToolBlocksUnsafeCommand(t *testing.T) {
 	tool, err := NewBashTool(t.TempDir())
 	if err != nil {
 		t.Fatalf("new bash tool: %v", err)
 	}
 
-	result := runBashTool(t, tool, map[string]any{"command": "curl https://example.com"})
+	result := runBashTool(t, tool, map[string]any{"command": "rm -rf ."})
 	if !result.IsError {
 		t.Fatalf("expected blocked command to be an error")
 	}
