@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,16 +15,20 @@ type permissionPrompt struct {
 	request types.PermissionRequest
 	choice  int
 	width   int
+	frame   int
 	styles  permissionPromptStyles
 }
 
 type permissionPromptStyles struct {
-	box      lipgloss.Style
-	title    lipgloss.Style
-	body     lipgloss.Style
-	muted    lipgloss.Style
-	selected lipgloss.Style
-	option   lipgloss.Style
+	box       lipgloss.Style
+	title     lipgloss.Style
+	meta      lipgloss.Style
+	body      lipgloss.Style
+	muted     lipgloss.Style
+	command   lipgloss.Style
+	selected  lipgloss.Style
+	option    lipgloss.Style
+	riskBadge lipgloss.Style
 }
 
 func newPermissionPrompt(request types.PermissionRequest) permissionPrompt {
@@ -32,28 +37,41 @@ func newPermissionPrompt(request types.PermissionRequest) permissionPrompt {
 		choice:  0,
 		styles: permissionPromptStyles{
 			box: lipgloss.NewStyle().
-				Background(tuiBackground).
+				Background(tuiSurface).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(tuiAccentWarn).
-				Padding(0, 1),
+				Padding(1, 2),
 			title: lipgloss.NewStyle().
-				Background(tuiBackground).
+				Background(tuiSurface).
 				Bold(true).
 				Foreground(tuiInkStrong),
+			meta: lipgloss.NewStyle().
+				Background(tuiSurface2).
+				Foreground(tuiAccentInfo).
+				Padding(0, 1),
 			body: lipgloss.NewStyle().
-				Background(tuiBackground).
+				Background(tuiSurface).
 				Foreground(tuiInk),
 			muted: lipgloss.NewStyle().
-				Background(tuiBackground).
+				Background(tuiSurface).
 				Foreground(tuiSubtle),
+			command: lipgloss.NewStyle().
+				Background(tuiSurface2).
+				Foreground(tuiInk).
+				Padding(0, 1),
 			selected: lipgloss.NewStyle().
 				Foreground(tuiInkStrong).
 				Background(tuiSelected).
 				Bold(true).
 				Padding(0, 1),
 			option: lipgloss.NewStyle().
-				Background(tuiBackground).
+				Background(tuiSurface).
 				Foreground(tuiMuted).
+				Padding(0, 1),
+			riskBadge: lipgloss.NewStyle().
+				Foreground(tuiInkStrong).
+				Background(tuiStatusWarn).
+				Bold(true).
 				Padding(0, 1),
 		},
 	}
@@ -94,8 +112,16 @@ func (p *permissionPrompt) SetWidth(width int) {
 	p.width = width
 }
 
+func (p *permissionPrompt) SetFrame(frame int) {
+	p.frame = frame
+}
+
+func (p permissionPrompt) Height() int {
+	return 9 + len(p.previewLines()) // content + border/padding, with preview wrapping
+}
+
 func (p permissionPrompt) View() string {
-	options := []string{"Allow once", "Allow session", "Deny"}
+	options := []string{"✓ Allow once", "◇ Allow session", "✕ Deny"}
 	rendered := make([]string, len(options))
 	for i, option := range options {
 		rendered[i] = p.styles.option.Render(option)
@@ -104,24 +130,58 @@ func (p permissionPrompt) View() string {
 		}
 	}
 
+	width := max(28, p.width-4)
+	innerWidth := max(20, width-8)
+	title := lipgloss.JoinHorizontal(
+		lipgloss.Center,
+		p.styles.title.Render(activeSelectorMarker(p.frame)+" Approve tool call?"),
+		" ",
+		p.styles.meta.Render(permissionToolMeta(p.request)),
+		" ",
+		p.styles.riskBadge.Render("review"),
+	)
+	commandPreview := p.styles.command.
+		Width(innerWidth).
+		Render(strings.Join(p.previewLines(), "\n"))
+	actionRow := lipgloss.JoinHorizontal(lipgloss.Left, rendered[0], " ", rendered[1], " ", rendered[2])
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		p.styles.body.Render("Tool access is paused until you choose how to proceed."),
+		p.styles.muted.Render("request"),
+		commandPreview,
+		actionRow,
+		p.styles.muted.Render("←/→ choose · enter confirm · esc deny"),
+	)
+
+	return p.styles.box.
+		BorderForeground(p.borderColor()).
+		Width(width).
+		Render(content)
+}
+
+func (p permissionPrompt) previewLines() []string {
 	input := strings.TrimSpace(string(p.request.Input))
 	if formatted := compactJSON(input); formatted != "" {
 		input = formatted
 	}
-	if len(input) > 320 {
-		input = input[:320] + "..."
+	if input == "" {
+		input = "{}"
+	}
+	if len(input) > 360 {
+		input = input[:360] + "..."
 	}
 
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		p.styles.title.Render("Approve tool call?"),
-		p.styles.body.Render(p.request.ToolName),
-		p.styles.muted.Render(input),
-		lipgloss.JoinHorizontal(lipgloss.Left, rendered[0], " ", rendered[1], " ", rendered[2]),
-		p.styles.muted.Render("arrows choose | enter confirm | esc deny"),
-	)
-
-	return p.styles.box.Width(max(20, p.width-4)).Render(content)
+	width := max(12, max(28, p.width-4)-10)
+	lines := strings.Split(lipgloss.Wrap(input, width, " "), "\n")
+	const maxLines = 3
+	if len(lines) <= maxLines {
+		return lines
+	}
+	lines = lines[:maxLines]
+	last := strings.TrimRight(lines[len(lines)-1], ". ")
+	lines[len(lines)-1] = last + "..."
+	return lines
 }
 
 func (p permissionPrompt) selectedStyle(choice int) lipgloss.Style {
@@ -136,6 +196,34 @@ func (p permissionPrompt) selectedStyle(choice int) lipgloss.Style {
 	default:
 		return style
 	}
+}
+
+func (p permissionPrompt) borderColor() color.Color {
+	if p.choice == 2 {
+		return tuiAccentDanger
+	}
+	if p.choice == 0 && p.frame%4 == 1 {
+		return tuiAccentInfo
+	}
+	if p.choice == 1 && p.frame%4 == 1 {
+		return tuiLineStrong
+	}
+	if p.frame%4 == 3 {
+		return tuiLine
+	}
+	return tuiAccentWarn
+}
+
+func permissionToolMeta(request types.PermissionRequest) string {
+	tool := strings.TrimSpace(request.ToolName)
+	if tool == "" {
+		tool = "tool"
+	}
+	mode := strings.TrimSpace(string(request.Mode))
+	if mode == "" {
+		mode = "ask"
+	}
+	return tool + " · " + mode
 }
 
 func compactJSON(value string) string {

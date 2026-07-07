@@ -730,6 +730,7 @@ func (m model) View() tea.View {
 	}
 	parts := []string{header, body}
 	if m.permission != nil {
+		m.permission.SetFrame(m.headerFrame)
 		parts = append(parts, m.permission.View())
 	}
 	if selector, ok := m.renderSlashSelector(); ok {
@@ -787,6 +788,7 @@ func (m model) terminalScrollView() tea.View {
 		parts = append(parts, live)
 	}
 	if m.permission != nil {
+		m.permission.SetFrame(m.headerFrame)
 		parts = append(parts, m.permission.View())
 	}
 	if selector, ok := m.renderSlashSelector(); ok {
@@ -871,7 +873,7 @@ func (m *model) resize() {
 	permissionHeight := 0
 	if m.permission != nil {
 		m.permission.SetWidth(m.width)
-		permissionHeight = 6
+		permissionHeight = m.permission.Height()
 	}
 	selectorHeight := m.slashSelectorHeight()
 	skillSelectorHeight := m.skillSelectorHeight()
@@ -1482,8 +1484,29 @@ func (m *model) resolvePermission(decision types.PermissionDecision, reason stri
 	}
 
 	m.broker.Resolve(m.permission.request, decision, reason)
+	if decision == types.PermissionDecisionDeny {
+		m.stopAfterPermissionDenied()
+		return
+	}
 	m.permission = nil
 	m.status = "thinking"
+	m.resize()
+	m.dirty = true
+}
+
+func (m *model) stopAfterPermissionDenied() {
+	if m.stepCancel != nil {
+		m.stepCancel()
+	}
+	m.stepCancel = nil
+	m.activeStepID = 0
+	m.busy = false
+	m.showSpinner = false
+	m.permission = nil
+	m.status = "ready"
+	m.clearActiveTools()
+	m.appendStatus("Permission denied. Agent action stopped.")
+	m.appendStatus("Tell the model what to do next now that this request was denied.")
 	m.resize()
 	m.dirty = true
 }
