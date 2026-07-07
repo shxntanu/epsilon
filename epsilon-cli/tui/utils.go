@@ -71,7 +71,7 @@ func renderToolSummary(entry transcriptEntry) string {
 	result := strings.TrimSpace(entry.toolResult)
 	if result == "" {
 		if entry.toolActive {
-			return "running"
+			return runningToolSummary(entry)
 		}
 		return ""
 	}
@@ -92,6 +92,16 @@ func renderToolSummary(entry transcriptEntry) string {
 	default:
 		return fmt.Sprintf("%d lines", count)
 	}
+}
+
+func runningToolSummary(entry transcriptEntry) string {
+	if command := renderBashToolCommand(entry); command != "" {
+		return "running: " + command
+	}
+	if title := renderToolTitle(entry); title != "" {
+		return "running: " + title
+	}
+	return "running"
 }
 
 func explorationDisplayName(entry transcriptEntry) string {
@@ -215,4 +225,25 @@ func onOff(value bool) string {
 	}
 
 	return "off"
+}
+
+func formatMetadata(metadata map[string]string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	display := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		if key == "diff" || key == "command" {
+			continue
+		}
+		display[key] = value
+	}
+	if len(display) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(display)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }

@@ -206,10 +206,7 @@ func (m *model) applyResumeSession(msg resumeSessionMsg) tea.Cmd {
 	m.status = "ready"
 	m.sessionTitle = strings.TrimSpace(msg.title)
 	m.followOutput = true
-	m.scrollPrinted = 0
-	m.scrollHeader = ""
-	m.scrollHeaderOut = false
-	m.scrollReplay = true
+	m.scrollback.Reset()
 	m.scrollPrinting = false
 	m.contextView = func() contextwindow.Summary {
 		return msg.session.ContextSummary(nil)

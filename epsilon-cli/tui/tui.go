@@ -3,15 +3,17 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"os"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/shxntanu/epsilon/core"
 	"github.com/shxntanu/epsilon/core/contextwindow"
@@ -20,6 +22,8 @@ import (
 	"github.com/shxntanu/epsilon/core/skills"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
+	"github.com/shxntanu/epsilon/epsilon-cli/tui/render"
+	"github.com/shxntanu/epsilon/epsilon-cli/tui/terminal"
 )
 
 // Config configures a TUI session.
@@ -63,7 +67,7 @@ func Start(ctx context.Context, config Config) error {
 	if resumed {
 		initialHistory = sess.History()
 	}
-	program := tea.NewProgram(newModel(ctx, sess, sub, config.PermissionBroker,
+	model := newModel(ctx, sess, sub, config.PermissionBroker,
 		config.Harness.SlashCommands(), contextSummary, selectedModel,
 		config.Harness.ListModels, config.Harness.ListSessions, config.Harness.ResumeSession,
 		config.Harness.CurrentModel, config.Harness.CurrentEffort,
@@ -71,7 +75,11 @@ func Start(ctx context.Context, config Config) error {
 		config.Harness.RenameSession, config.Harness.SetActiveSkill,
 		config.Harness.ClearActiveSkill, config.Harness.SuggestSkill,
 		config.Harness.ActiveSkill, config.Harness.Skills,
-		config.Harness.RefreshSkills, initialHistory),
+		config.Harness.RefreshSkills, initialHistory)
+	if resumed {
+		model.printInitialScrollback()
+	}
+	program := tea.NewProgram(model,
 		tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
@@ -118,9 +126,7 @@ type resumeSessionMsg struct {
 	err       error
 }
 type terminalScrollbackPrintedMsg struct {
-	printed    int
-	headerOut  bool
-	replayDone bool
+	blocks []render.Block
 }
 
 const bottomGutterHeight = 1
@@ -223,8 +229,6 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 	suggestSkill func(string) *skills.Skill, currentSkill func() *skills.Skill,
 	listSkills func() []skills.Skill, refreshSkills func() (int, error),
 	initialHistory []types.Event) model {
-	vp := viewport.New()
-	vp.SoftWrap = true
 	if slashRegistry == nil {
 		slashRegistry = slash.NewDefaultRegistry()
 	}
@@ -377,9 +381,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			entries:   entries,
 		},
 		layoutState: layoutState{
-			viewport:       vp,
 			showBackground: false,
-			mouseCapture:   true,
 			density:        densityComfortable,
 			followOutput:   true,
 		},
@@ -391,7 +393,7 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 			dirty:        true,
 		},
 		scrollbackState: scrollbackState{
-			scrollReplay: true,
+			scrollback: terminal.NewScrollbackEmitter(),
 		},
 		visualState: visualState{
 			styles: styles,
@@ -401,6 +403,30 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 
 func (m model) Init() tea.Cmd {
 	return tea.Batch(m.composer.Init(), m.waitForEvent(), m.startHeaderAnimation())
+}
+
+func (m *model) printInitialScrollback() {
+	width := terminalWidth()
+	m.width = width
+	blocks := m.renderBlocks()
+	pending := m.scrollback.Pending(blocks)
+	if len(pending) == 0 {
+		return
+	}
+	rendered := m.renderScrollbackBlocks(pending)
+	m.scrollback.MarkPrinted(pending)
+	if rendered == "" {
+		return
+	}
+	fmt.Fprintln(os.Stdout, rendered)
+}
+
+func terminalWidth() int {
+	width, _, err := term.GetSize(os.Stdout.Fd())
+	if err != nil || width <= 0 {
+		return 100
+	}
+	return width
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -415,7 +441,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.permission != nil {
 			if msg.Keystroke() == "esc" && m.busy {
 				m.interruptModel()
-				m.syncViewport()
 				return m, nil
 			}
 			cmd := m.updatePermissionPrompt(msg)
@@ -425,7 +450,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.startHeaderAnimation(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m.syncViewport()
 			if cmd := m.terminalScrollbackCmd(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -439,7 +463,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.startHeaderAnimation(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m.syncViewport()
 			if cmd := m.terminalScrollbackCmd(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -453,7 +476,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.startHeaderAnimation(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m.syncViewport()
 			if cmd := m.terminalScrollbackCmd(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -467,7 +489,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.startHeaderAnimation(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m.syncViewport()
 			if cmd := m.terminalScrollbackCmd(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -553,16 +574,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "pgup":
 			m.quitArmed = false
-			m.viewport.PageUp()
-			m.followOutput = false
+			m.status = "scrollback:native"
 		case "pgdown":
 			m.quitArmed = false
-			m.viewport.PageDown()
-			m.followOutput = m.viewport.AtBottom()
+			m.status = "scrollback:native"
 		case "ctrl+up":
 			m.quitArmed = false
-			m.viewport.HalfPageUp()
-			m.followOutput = false
+			m.status = "scrollback:native"
 		case "ctrl+u":
 			m.quitArmed = false
 			var cmd tea.Cmd
@@ -571,8 +589,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "ctrl+down", "ctrl+d":
 			m.quitArmed = false
-			m.viewport.HalfPageDown()
-			m.followOutput = m.viewport.AtBottom()
+			if msg.Keystroke() == "ctrl+d" {
+				var cmd tea.Cmd
+				m.composer, cmd = m.composer.Update(msg)
+				cmds = append(cmds, cmd)
+				m.resize()
+			} else {
+				m.status = "scrollback:native"
+			}
 		case "ctrl+o":
 			m.quitArmed = false
 			m.showEvents = !m.showEvents
@@ -584,13 +608,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		case "ctrl+g":
 			m.quitArmed = false
-			m.mouseCapture = !m.mouseCapture
-			if m.mouseCapture {
-				m.status = "view:terminal"
-				m.prepareTerminalScroll()
-			} else {
-				m.status = "view:app"
-			}
+			m.status = "scrollback:native"
 			m.dirty = true
 		case "ctrl+t":
 			m.quitArmed = false
@@ -619,10 +637,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resize()
 		}
 	case tea.MouseWheelMsg:
-		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
-		cmds = append(cmds, cmd)
-		m.followOutput = m.viewport.AtBottom()
+		m.status = "scrollback:native"
 	case eventMsg:
 		event := types.Event(msg)
 		if event.SessionID == "" || event.SessionID == m.session.ID() {
@@ -645,9 +660,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case terminalScrollbackPrintedMsg:
-		m.scrollPrinted = msg.printed
-		m.scrollHeaderOut = msg.headerOut
-		m.scrollReplay = !msg.replayDone
+		m.scrollback.MarkPrinted(msg.blocks)
 		m.scrollPrinting = false
 	case spinner.TickMsg:
 		if m.showSpinner || m.hasActiveTools() {
@@ -690,8 +703,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
-		cmds = append(cmds, cmd)
 		m.composer, cmd = m.composer.Update(msg)
 		cmds = append(cmds, cmd)
 		m.resize()
@@ -700,7 +711,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd := m.startHeaderAnimation(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	m.syncViewport()
 	if cmd := m.terminalScrollbackCmd(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -708,15 +718,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() tea.View {
-	if m.terminalScrollMode() {
-		return m.terminalScrollView()
-	}
-
 	headerText := m.renderHeaderText(m.width)
 	header := m.styles.header.Width(max(0, m.width-2)).Render(headerText)
 	helpText := "ctrl+o details:" + onOff(m.showEvents) +
 		" | ctrl+x context:" + onOff(m.showContext) +
-		" | ctrl+g view:" + m.viewModeLabel() + " | ctrl+c twice quit"
+		" | native scrollback | ctrl+c twice quit"
 	if m.busy {
 		helpText = "esc interrupt | " + helpText
 	}
@@ -724,13 +730,11 @@ func (m model) View() tea.View {
 	contextLine := m.renderContextWidget()
 	bottomGutter := strings.Repeat("\n", bottomGutterHeight)
 
-	body := m.viewport.View()
-	if m.contextPanelWidth() > 0 {
-		body = lipgloss.JoinHorizontal(lipgloss.Top, body, m.renderContextPanel())
+	parts := []string{header}
+	if live := m.renderTerminalLiveTranscript(); live != "" {
+		parts = append(parts, m.styles.toolBlock.Render(live))
 	}
-	parts := []string{header, body}
 	if m.permission != nil {
-		m.permission.SetFrame(m.headerFrame)
 		parts = append(parts, m.permission.View())
 	}
 	if selector, ok := m.renderSlashSelector(); ok {
@@ -758,69 +762,12 @@ func (m model) View() tea.View {
 	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	content = m.styles.screen.
 		Width(max(0, m.width)).
-		Height(max(0, m.height)).
 		Render(content)
-	content = paintScreenBackground(content, m.width, m.height)
 
 	var view tea.View
 	view.SetContent(content)
 	view.BackgroundColor = tuiBackgroundColor
-	view.AltScreen = true
-	view.MouseMode = m.currentMouseMode()
-	return view
-}
-
-func (m model) terminalScrollMode() bool {
-	return m.mouseCapture
-}
-
-func (m model) terminalScrollView() tea.View {
-	parts := make([]string, 0, 6)
-	if m.shouldRenderStartupHeader() {
-		parts = append(parts, m.renderStartupHeader(m.width))
-	} else if m.showEvents {
-		if detail := m.renderTerminalDetailTranscript(); detail != "" {
-			parts = append(parts, detail)
-		}
-	} else if replay := m.renderTerminalReplayTranscript(); replay != "" {
-		parts = append(parts, replay)
-	} else if live := m.renderTerminalLiveTranscript(); live != "" {
-		parts = append(parts, live)
-	}
-	if m.permission != nil {
-		m.permission.SetFrame(m.headerFrame)
-		parts = append(parts, m.permission.View())
-	}
-	if selector, ok := m.renderSlashSelector(); ok {
-		parts = append(parts, selector)
-	}
-	if selector, ok := m.renderSkillSelector(); ok {
-		parts = append(parts, selector)
-	}
-	if selector, ok := m.renderFileSelector(); ok {
-		parts = append(parts, selector)
-	}
-	if picker, ok := m.renderModelPicker(); ok {
-		parts = append(parts, picker)
-	}
-	if picker, ok := m.renderSkillPicker(); ok {
-		parts = append(parts, picker)
-	}
-	if picker, ok := m.renderSessionPicker(); ok {
-		parts = append(parts, picker)
-	}
-	parts = append(parts, m.composer.View(m.slashSelectorActive(), m.skillComposerMode(),
-		m.fileSelectorActive(),
-		m.composerSkillPrefix(), m.headerFrame))
-	if m.busy {
-		parts = append(parts, m.styles.help.Render("esc interrupt | ctrl+g app view | ctrl+c twice quit"))
-	} else {
-		parts = append(parts, m.styles.help.Render("ctrl+g app view | ctrl+c twice quit"))
-	}
-
-	var view tea.View
-	view.SetContent(lipgloss.JoinVertical(lipgloss.Left, parts...))
-	view.BackgroundColor = tuiBackgroundColor
+	view.AltScreen = false
 	view.MouseMode = tea.MouseModeNone
 	return view
 }
@@ -851,43 +798,16 @@ func (m model) currentSessionLabel() string {
 	return m.session.ID()
 }
 
-func (m model) currentMouseMode() tea.MouseMode {
-	if m.mouseCapture && !m.terminalScrollMode() {
-		return tea.MouseModeCellMotion
-	}
-	return tea.MouseModeNone
-}
-
 func (m model) viewModeLabel() string {
-	if m.terminalScrollMode() {
-		return "terminal"
-	}
-	return "app"
+	return "terminal"
 }
 
 func (m *model) resize() {
-	headerHeight := 2
-	helpHeight := 2
 	m.composer.SetDensity(m.density)
 	m.composer.SetWidth(m.width)
-	permissionHeight := 0
 	if m.permission != nil {
 		m.permission.SetWidth(m.width)
-		permissionHeight = m.permission.Height()
 	}
-	selectorHeight := m.slashSelectorHeight()
-	skillSelectorHeight := m.skillSelectorHeight()
-	fileSelectorHeight := m.fileSelectorHeight()
-	modelPickerHeight := m.modelPickerHeight()
-	sessionPickerHeight := m.sessionPickerHeight()
-	skillPickerHeight := m.skillPickerHeight()
-	viewportHeight := max(3, m.height-headerHeight-m.composer.Height()-helpHeight-
-		permissionHeight-selectorHeight-skillSelectorHeight-modelPickerHeight-
-		fileSelectorHeight-sessionPickerHeight-skillPickerHeight-bottomGutterHeight)
-	viewportWidth := max(20, m.width-m.contextPanelWidth())
-
-	m.viewport.SetWidth(viewportWidth)
-	m.viewport.SetHeight(viewportHeight)
 	m.dirty = true
 }
 
@@ -900,7 +820,7 @@ func (m model) renderContextPanel() string {
 	if width == 0 {
 		return ""
 	}
-	return newContextPanel(m.contextView(), width, m.viewport.Height(), m.selectedModelInfo()).Panel()
+	return newContextPanel(m.contextView(), width, max(3, m.height-4), m.selectedModelInfo()).Panel()
 }
 
 func (m model) contextPanelWidth() int {
@@ -1143,7 +1063,6 @@ func (m *model) applyEvent(event types.Event, interactive bool) {
 		}
 	case types.EventPermissionRequested:
 		if event.Permission != nil {
-			m.appendStatus("Waiting for approval to use " + event.Permission.Request.ToolName)
 			if interactive && m.broker != nil {
 				prompt := newPermissionPrompt(event.Permission.Request)
 				prompt.SetWidth(m.width)
@@ -1154,8 +1073,6 @@ func (m *model) applyEvent(event types.Event, interactive bool) {
 		}
 	case types.EventPermissionGranted, types.EventPermissionDenied:
 		if event.Permission != nil {
-			m.appendStatus(strings.ReplaceAll(string(event.Kind), "_", " ") + ": " +
-				event.Permission.Reason)
 			if interactive {
 				m.permission = nil
 				m.resize()
@@ -1538,92 +1455,31 @@ func (m *model) confirmQuit() tea.Cmd {
 	return nil
 }
 
-func (m *model) syncViewport() {
-	if !m.dirty {
-		return
-	}
-	atBottom := m.viewport.AtBottom()
-	m.viewport.SetContent(m.renderTranscript())
-	if m.followOutput || atBottom {
-		m.viewport.GotoBottom()
-		m.followOutput = true
-	}
-	m.dirty = false
-}
-
-func (m *model) prepareTerminalScroll() {
-	m.scrollPrinted = 0
-	m.scrollHeader = m.renderHeaderText(m.width)
-	m.scrollHeaderOut = false
-	m.scrollReplay = true
-	m.scrollPrinting = false
-}
-
 func (m *model) terminalScrollbackCmd() tea.Cmd {
-	if !m.terminalScrollMode() || m.scrollPrinting {
+	if m.scrollPrinting {
 		return nil
 	}
 
-	printed := m.scrollPrinted
-	if printed > len(m.entries) {
-		printed = len(m.entries)
+	blocks := m.renderBlocks()
+	pending := m.scrollback.Pending(blocks)
+	if len(pending) == 0 {
+		return nil
 	}
-
-	headerOut := m.scrollHeaderOut
-	lines := make([]string, 0, max(0, len(m.entries)-printed))
-	for printed < len(m.entries) {
-		if !m.isTerminalPrintableEntry(printed) {
-			break
-		}
-		line, ok := m.renderScrollbackTranscriptEntry(m.entries[printed])
-		printed++
-		if ok {
-			lines = append(lines, line)
-		}
-	}
-	replayDone := printed >= len(m.entries)
-	if len(lines) == 0 {
-		if replayDone {
-			m.scrollReplay = false
-		}
+	rendered := m.renderScrollbackBlocks(pending)
+	if rendered == "" {
+		m.scrollback.MarkPrinted(pending)
 		return nil
 	}
 	m.scrollPrinting = true
 
 	return tea.Sequence(
-		tea.Println(strings.Join(lines, m.entrySeparator())),
+		tea.Println(rendered),
 		func() tea.Msg {
 			return terminalScrollbackPrintedMsg{
-				printed:    printed,
-				headerOut:  headerOut,
-				replayDone: replayDone,
+				blocks: pending,
 			}
 		},
 	)
-}
-
-func (m model) renderTerminalReplayTranscript() string {
-	if !m.scrollReplay {
-		return ""
-	}
-	lines := make([]string, 0, max(0, len(m.entries)-m.scrollPrinted))
-	for index := m.scrollPrinted; index < len(m.entries); index++ {
-		if !m.isTerminalPrintableEntry(index) {
-			break
-		}
-		line, ok := m.renderScrollbackTranscriptEntry(m.entries[index])
-		if ok {
-			lines = append(lines, line)
-		}
-	}
-	return strings.Join(lines, m.entrySeparator())
-}
-
-func (m model) renderTerminalDetailTranscript() string {
-	if len(m.entries) == 0 {
-		return ""
-	}
-	return m.styles.toolBlock.Render(m.renderTranscript())
 }
 
 func (m model) renderScrollbackTranscriptEntry(entry transcriptEntry) (string, bool) {
@@ -1632,7 +1488,83 @@ func (m model) renderScrollbackTranscriptEntry(entry transcriptEntry) (string, b
 	return collapsed.renderTranscriptEntry(entry)
 }
 
-func (m model) isTerminalPrintableEntry(index int) bool {
+func (m model) renderBlocks() []render.Block {
+	blocks := make([]render.Block, 0, len(m.entries))
+	for index, entry := range m.entries {
+		block := transcriptEntryToBlock(entry)
+		if block.ID == "" {
+			block.ID = fmt.Sprintf("transcript:%d:%s:%08x", index, block.Kind, blockHash(block))
+		}
+		block.Stable = m.isStableTranscriptEntry(index)
+		blocks = append(blocks, block)
+	}
+	return blocks
+}
+
+func blockHash(block render.Block) uint32 {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(block.Content))
+	if block.Metadata != nil {
+		keys := make([]string, 0, len(block.Metadata))
+		for key := range block.Metadata {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			_, _ = hash.Write([]byte{0})
+			_, _ = hash.Write([]byte(key))
+			_, _ = hash.Write([]byte{0})
+			_, _ = hash.Write([]byte(block.Metadata[key]))
+		}
+	}
+	return hash.Sum32()
+}
+
+func (m model) renderScrollbackBlocks(blocks []render.Block) string {
+	lines := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		rendered := m.RenderBlock(block, m.harnessMessageWidth())
+		if rendered.Height > 0 {
+			lines = append(lines, strings.Join(rendered.Lines, "\n"))
+		}
+	}
+	return strings.Join(lines, m.entrySeparator())
+}
+
+func (m model) RenderBlock(block render.Block, width int) render.RenderedBlock {
+	entry := blockToTranscriptEntry(block)
+	collapsed := m
+	collapsed.showEvents = false
+	collapsed.width = width
+	line, ok := collapsed.renderTranscriptEntry(entry)
+	if !ok || line == "" {
+		return render.RenderedBlock{ID: block.ID}
+	}
+	lines := strings.Split(line, "\n")
+	return render.RenderedBlock{
+		ID:     block.ID,
+		Lines:  lines,
+		Height: len(lines),
+	}
+}
+
+func (m model) renderTerminalLiveTranscript() string {
+	lines := make([]string, 0, 3)
+	if m.streaming >= 0 && m.streaming < len(m.entries) {
+		if line, ok := m.renderTranscriptEntry(m.entries[m.streaming]); ok {
+			lines = append(lines, line)
+		}
+	}
+	if active := m.renderActiveToolEntries(); active != "" {
+		lines = append(lines, active)
+	}
+	if m.showSpinner {
+		lines = append(lines, m.renderSpinnerMessage())
+	}
+	return strings.Join(lines, m.entrySeparator())
+}
+
+func (m model) isStableTranscriptEntry(index int) bool {
 	if index < 0 || index >= len(m.entries) {
 		return false
 	}
@@ -1657,22 +1589,6 @@ func (m model) isTerminalPrintableEntry(index int) bool {
 	}
 }
 
-func (m model) renderTerminalLiveTranscript() string {
-	lines := make([]string, 0, 2)
-	if m.streaming >= 0 && m.streaming < len(m.entries) {
-		if line, ok := m.renderTranscriptEntry(m.entries[m.streaming]); ok {
-			lines = append(lines, line)
-		}
-	}
-	if active := m.renderActiveToolEntries(); active != "" {
-		lines = append(lines, active)
-	}
-	if m.showSpinner {
-		lines = append(lines, m.renderSpinnerMessage())
-	}
-	return strings.Join(lines, m.entrySeparator())
-}
-
 func (m model) renderActiveToolEntries() string {
 	lines := make([]string, 0, 2)
 	for _, entry := range m.entries {
@@ -1687,25 +1603,6 @@ func (m model) renderActiveToolEntries() string {
 			}
 		}
 	}
-	return strings.Join(lines, m.entrySeparator())
-}
-
-func (m model) renderTranscript() string {
-	lines := make([]string, 0, len(m.entries))
-	for _, entry := range m.entries {
-		line, ok := m.renderTranscriptEntry(entry)
-		if ok {
-			lines = append(lines, line)
-		}
-	}
-	if m.showSpinner {
-		lines = append(lines, m.renderSpinnerMessage())
-	}
-
-	if len(lines) == 0 {
-		return m.styles.muted.Render("Ready. Send a message to start.")
-	}
-
 	return strings.Join(lines, m.entrySeparator())
 }
 
@@ -1783,11 +1680,11 @@ func (m model) renderStatusEntry(entry transcriptEntry) string {
 }
 
 func (m model) messageWidth() int {
-	return max(20, m.viewport.Width()-2)
+	return max(20, m.width-2)
 }
 
 func (m model) harnessMessageWidth() int {
-	return max(20, m.viewport.Width())
+	return max(20, m.width)
 }
 
 func (m model) harnessMessage() harnessMessage {
@@ -1809,33 +1706,8 @@ func (m model) entrySeparator() string {
 	return "\n\n"
 }
 
-func (m model) densityCompact() bool {
-	return m.density == densityCompact
-}
-
 func quitCmd() tea.Cmd {
 	return func() tea.Msg {
 		return tea.Quit()
 	}
-}
-
-func formatMetadata(metadata map[string]string) string {
-	if len(metadata) == 0 {
-		return ""
-	}
-	display := make(map[string]string, len(metadata))
-	for key, value := range metadata {
-		if key == "diff" || key == "command" {
-			continue
-		}
-		display[key] = value
-	}
-	if len(display) == 0 {
-		return ""
-	}
-	data, err := json.Marshal(display)
-	if err != nil {
-		return ""
-	}
-	return string(data)
 }

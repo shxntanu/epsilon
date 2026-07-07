@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/viewport"
 
 	"github.com/shxntanu/epsilon/core/contextwindow"
 	"github.com/shxntanu/epsilon/core/events"
@@ -12,6 +11,7 @@ import (
 	"github.com/shxntanu/epsilon/core/skills"
 	"github.com/shxntanu/epsilon/core/slash"
 	"github.com/shxntanu/epsilon/core/types"
+	"github.com/shxntanu/epsilon/epsilon-cli/tui/terminal"
 )
 
 type appState struct {
@@ -68,7 +68,6 @@ type transcriptState struct {
 }
 
 type layoutState struct {
-	viewport       viewport.Model
 	width          int
 	height         int
 	followOutput   bool
@@ -76,7 +75,6 @@ type layoutState struct {
 	showEvents     bool
 	showContext    bool
 	showBackground bool
-	mouseCapture   bool
 }
 
 type activityState struct {
@@ -93,11 +91,8 @@ type activityState struct {
 }
 
 type scrollbackState struct {
-	scrollPrinted   int
-	scrollHeader    string
-	scrollHeaderOut bool
-	scrollReplay    bool
-	scrollPrinting  bool
+	scrollback     terminal.ScrollbackEmitter
+	scrollPrinting bool
 }
 
 type stepState struct {

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -91,28 +90,6 @@ func TestHydrateTranscriptEntriesGroupsExplorationTools(t *testing.T) {
 	}
 	if entries[0].tools[1].toolResult != "README.md:1:epsilon" {
 		t.Fatalf("second tool result = %q, want ripgrep result", entries[0].tools[1].toolResult)
-	}
-}
-
-func TestHydrateTranscriptEntriesHandlesPermissionHistory(t *testing.T) {
-	history := []types.Event{
-		types.NewPermissionRequestedEvent(time.Now().UTC(), types.PermissionRequest{ToolName: "read_file"}),
-		types.NewPermissionGrantedEvent(time.Now().UTC(), types.PermissionResult{Reason: "allowed"}),
-		types.NewSessionErrorEvent(time.Now().UTC(), errors.New("boom")),
-	}
-
-	entries := hydrateTranscriptEntries(history)
-	if len(entries) != 3 {
-		t.Fatalf("entries = %d, want 3", len(entries))
-	}
-	if entries[0].kind != transcriptStatus || !strings.Contains(entries[0].text, "Waiting for approval to use read_file") {
-		t.Fatalf("first entry = %#v, want permission status", entries[0])
-	}
-	if entries[1].kind != transcriptStatus || !strings.Contains(entries[1].text, "permission granted: allowed") {
-		t.Fatalf("second entry = %#v, want granted status", entries[1])
-	}
-	if entries[2].kind != transcriptPlain || !strings.Contains(entries[2].text, "session error: boom") {
-		t.Fatalf("third entry = %#v, want session error", entries[2])
 	}
 }
 

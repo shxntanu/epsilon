@@ -2,7 +2,6 @@ package tui
 
 import (
 	"encoding/json"
-	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,7 +14,6 @@ type permissionPrompt struct {
 	request types.PermissionRequest
 	choice  int
 	width   int
-	frame   int
 	styles  permissionPromptStyles
 }
 
@@ -39,7 +37,7 @@ func newPermissionPrompt(request types.PermissionRequest) permissionPrompt {
 			box: lipgloss.NewStyle().
 				Background(tuiSurface).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(tuiAccentWarn).
+				BorderForeground(tuiLineStrong).
 				Padding(1, 2),
 			title: lipgloss.NewStyle().
 				Background(tuiSurface).
@@ -70,7 +68,7 @@ func newPermissionPrompt(request types.PermissionRequest) permissionPrompt {
 				Padding(0, 1),
 			riskBadge: lipgloss.NewStyle().
 				Foreground(tuiInkStrong).
-				Background(tuiStatusWarn).
+				Background(tuiSelected).
 				Bold(true).
 				Padding(0, 1),
 		},
@@ -112,12 +110,8 @@ func (p *permissionPrompt) SetWidth(width int) {
 	p.width = width
 }
 
-func (p *permissionPrompt) SetFrame(frame int) {
-	p.frame = frame
-}
-
 func (p permissionPrompt) Height() int {
-	return 9 + len(p.previewLines()) // content + border/padding, with preview wrapping
+	return 11 + len(p.previewLines()) // content + border/padding, with preview wrapping
 }
 
 func (p permissionPrompt) View() string {
@@ -130,11 +124,11 @@ func (p permissionPrompt) View() string {
 		}
 	}
 
-	width := max(28, p.width-4)
+	width := min(max(44, p.width-4), 118)
 	innerWidth := max(20, width-8)
 	title := lipgloss.JoinHorizontal(
 		lipgloss.Center,
-		p.styles.title.Render(activeSelectorMarker(p.frame)+" Approve tool call?"),
+		p.styles.title.Render("Approve tool call?"),
 		" ",
 		p.styles.meta.Render(permissionToolMeta(p.request)),
 		" ",
@@ -148,14 +142,15 @@ func (p permissionPrompt) View() string {
 		lipgloss.Left,
 		title,
 		p.styles.body.Render("Tool access is paused until you choose how to proceed."),
+		"",
 		p.styles.muted.Render("request"),
 		commandPreview,
+		"",
 		actionRow,
 		p.styles.muted.Render("←/→ choose · enter confirm · esc deny"),
 	)
 
 	return p.styles.box.
-		BorderForeground(p.borderColor()).
 		Width(width).
 		Render(content)
 }
@@ -196,22 +191,6 @@ func (p permissionPrompt) selectedStyle(choice int) lipgloss.Style {
 	default:
 		return style
 	}
-}
-
-func (p permissionPrompt) borderColor() color.Color {
-	if p.choice == 2 {
-		return tuiAccentDanger
-	}
-	if p.choice == 0 && p.frame%4 == 1 {
-		return tuiAccentInfo
-	}
-	if p.choice == 1 && p.frame%4 == 1 {
-		return tuiLineStrong
-	}
-	if p.frame%4 == 3 {
-		return tuiLine
-	}
-	return tuiAccentWarn
 }
 
 func permissionToolMeta(request types.PermissionRequest) string {
