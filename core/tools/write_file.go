@@ -141,14 +141,27 @@ func (t *WriteFileTool) Run(ctx context.Context, input json.RawMessage) (*types.
 		"bytes":     fmt.Sprintf("%d", len(req.Content)),
 		"workspace": t.workspace.Root(),
 	}
-	if diff := writeFileDiff(req.Path, previous, []byte(req.Content), existed); diff != "" {
+	if diff, truncated, originalBytes := writeFileDiff(req.Path, previous, []byte(req.Content),
+		existed, "write_file"); diff != "" {
 		result.Metadata["diff"] = diff
+		result.Metadata["diff_truncated"] = fmt.Sprintf("%t", truncated)
+		result.Metadata["diff_bytes"] = fmt.Sprintf("%d", originalBytes)
 	}
 
 	return &result, nil
 }
 
-func writeFileDiff(path string, before []byte, after []byte, existed bool) string {
+func writeFileDiff(path string, before []byte, after []byte, existed bool,
+	toolName string) (string, bool, int) {
+	diff := renderFileDiff(path, before, after, existed)
+	if diff == "" {
+		return "", false, 0
+	}
+	preview, truncated := boundedDiffPreview(diff, toolName)
+	return preview, truncated, len(diff)
+}
+
+func renderFileDiff(path string, before []byte, after []byte, existed bool) string {
 	if existed && bytes.Equal(before, after) {
 		return ""
 	}
@@ -165,13 +178,34 @@ func writeFileDiff(path string, before []byte, after []byte, existed bool) strin
 	}
 	writeFullFileDiffLines(&b, '+', string(after))
 
-	diff := b.String()
-	if len(diff) <= defaultWriteFileDiffMaxBytes {
-		return diff
-	}
+	return b.String()
+}
 
-	return fmt.Sprintf("--- a/%s\n+++ b/%s\n@@\n%s\n", path, path,
-		"[diff omitted: write_file change exceeds 16384 bytes]")
+func boundedDiffPreview(diff string, toolName string) (string, bool) {
+	if len(diff) <= defaultWriteFileDiffMaxBytes {
+		return diff, false
+	}
+	marker := fmt.Sprintf(
+		"\n[diff truncated: %s change exceeded %d bytes; showing head and tail of %d-byte diff]\n",
+		toolName,
+		defaultWriteFileDiffMaxBytes,
+		len(diff),
+	)
+	budget := defaultWriteFileDiffMaxBytes - len(marker)
+	if budget <= 0 {
+		return marker[:min(len(marker), defaultWriteFileDiffMaxBytes)], true
+	}
+	headBytes := budget / 2
+	tailBytes := budget - headBytes
+	head := diff[:headBytes]
+	if idx := strings.LastIndexByte(head, '\n'); idx > 0 {
+		head = head[:idx+1]
+	}
+	tail := diff[len(diff)-tailBytes:]
+	if idx := strings.IndexByte(tail, '\n'); idx >= 0 && idx+1 < len(tail) {
+		tail = tail[idx+1:]
+	}
+	return head + marker + tail, true
 }
 
 func writeFullFileDiffLines(b *strings.Builder, prefix byte, text string) {

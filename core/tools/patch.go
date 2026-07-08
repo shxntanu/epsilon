@@ -104,6 +104,19 @@ type patchFileSnapshot struct {
 	afterSet bool
 }
 
+type patchChangeSummary struct {
+	Path          string `json:"path"`
+	Type          string `json:"type"`
+	MovePath      string `json:"move_path,omitempty"`
+	BeforeBytes   int    `json:"before_bytes"`
+	AfterBytes    int    `json:"after_bytes"`
+	AddedLines    int    `json:"added_lines"`
+	RemovedLines  int    `json:"removed_lines"`
+	DiffBytes     int    `json:"diff_bytes"`
+	DiffTruncated bool   `json:"diff_truncated"`
+	Exact         bool   `json:"exact"`
+}
+
 func (t *PatchTool) runPatch(ctx context.Context, patchText string) (*types.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("apply_patch cancelled: %w", err)
@@ -194,7 +207,7 @@ func (t *PatchTool) applyHunk(hunk patchHunk, snapshots map[string]*patchFileSna
 			if err := os.Remove(sourcePath); err != nil {
 				return fmt.Errorf("remove original after move: %w", err)
 			}
-			affected[hunk.path] = "modified"
+			affected[hunk.path] = "moved:" + hunk.movePath
 			affected[hunk.movePath] = "added"
 			if err := snapshotAfter(destPath, snapshots); err != nil {
 				return err
@@ -618,7 +631,7 @@ func snapshotAfter(path string, snapshots map[string]*patchFileSnapshot) error {
 	return fmt.Errorf("read updated file for diff: %w", err)
 }
 
-func patchResultMetadata(workspace string, snapshots map[string]*patchFileSnapshot, 
+func patchResultMetadata(workspace string, snapshots map[string]*patchFileSnapshot,
 	affected map[string]string) map[string]string {
 	metadata := map[string]string{
 		"status":    "patched",
@@ -629,6 +642,7 @@ func patchResultMetadata(workspace string, snapshots map[string]*patchFileSnapsh
 		metadata["modified_files"] = strings.Join(paths, ",")
 	}
 	var diff strings.Builder
+	changes := make([]patchChangeSummary, 0, len(snapshots))
 	for _, path := range sortedSnapshotPaths(snapshots) {
 		snapshot := snapshots[path]
 		if !snapshot.afterSet {
@@ -638,22 +652,95 @@ func patchResultMetadata(workspace string, snapshots map[string]*patchFileSnapsh
 		if rel, err := filepath.Rel(workspace, path); err == nil {
 			displayPath = rel
 		}
-		existedAfter := true
-		if _, err := os.Stat(path); err != nil {
-			existedAfter = false
+		if isMoveDestination(displayPath, affected) {
+			continue
 		}
-		switch {
-		case snapshot.existed && !existedAfter:
-			diff.WriteString(writeFileDiff(displayPath, snapshot.before, nil, true))
-		default:
-			diff.WriteString(writeFileDiff(displayPath, snapshot.before, snapshot.after,
-				snapshot.existed))
+		fileDiff, change := patchSnapshotDiff(workspace, displayPath, snapshot, snapshots, affected)
+		if fileDiff != "" {
+			diff.WriteString(fileDiff)
+		}
+		if change.Exact {
+			changes = append(changes, change)
 		}
 	}
 	if diff.String() != "" {
-		metadata["diff"] = truncatePatchDiff(diff.String())
+		preview, truncated := boundedDiffPreview(diff.String(), "apply_patch")
+		metadata["diff"] = preview
+		metadata["diff_truncated"] = fmt.Sprintf("%t", truncated)
+		metadata["diff_bytes"] = fmt.Sprintf("%d", len(diff.String()))
+	}
+	if len(changes) > 0 {
+		if data, err := json.Marshal(changes); err == nil {
+			metadata["changes_json"] = string(data)
+		}
 	}
 	return metadata
+}
+
+func patchSnapshotDiff(workspace string, displayPath string, snapshot *patchFileSnapshot,
+	snapshots map[string]*patchFileSnapshot, affected map[string]string) (string, patchChangeSummary) {
+	kind := patchChangeKind(snapshot)
+	movePath := ""
+	before := snapshot.before
+	after := snapshot.after
+	if movedTo, ok := strings.CutPrefix(affected[displayPath], "moved:"); ok {
+		kind = "update"
+		movePath = movedTo
+		if movedSnapshot, ok := snapshots[filepath.Join(workspace, movedTo)]; ok && movedSnapshot.afterSet {
+			after = movedSnapshot.after
+		}
+	}
+	diff := renderFileDiff(displayPath, before, after, snapshot.existed)
+	_, truncated := boundedDiffPreview(diff, "apply_patch")
+	added, removed := countDiffLineChanges(diff)
+	return diff, patchChangeSummary{
+		Path:          displayPath,
+		Type:          kind,
+		MovePath:      movePath,
+		BeforeBytes:   len(before),
+		AfterBytes:    len(after),
+		AddedLines:    added,
+		RemovedLines:  removed,
+		DiffBytes:     len(diff),
+		DiffTruncated: truncated,
+		Exact:         true,
+	}
+}
+
+func isMoveDestination(path string, affected map[string]string) bool {
+	for _, state := range affected {
+		if movedTo, ok := strings.CutPrefix(state, "moved:"); ok && movedTo == path {
+			return true
+		}
+	}
+	return false
+}
+
+func patchChangeKind(snapshot *patchFileSnapshot) string {
+	switch {
+	case !snapshot.existed && snapshot.afterSet && snapshot.after != nil:
+		return "add"
+	case snapshot.existed && snapshot.afterSet && snapshot.after == nil:
+		return "delete"
+	default:
+		return "update"
+	}
+}
+
+func countDiffLineChanges(diff string) (int, int) {
+	added := 0
+	removed := 0
+	for _, line := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+			continue
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	return added, removed
 }
 
 func sortedPatchPaths(affected map[string]string) []string {
@@ -672,13 +759,6 @@ func sortedSnapshotPaths(snapshots map[string]*patchFileSnapshot) []string {
 	}
 	sort.Strings(paths)
 	return paths
-}
-
-func truncatePatchDiff(diff string) string {
-	if len(diff) <= defaultWriteFileDiffMaxBytes {
-		return diff
-	}
-	return "[diff omitted: apply_patch change exceeds 16384 bytes]\n"
 }
 
 func formatPatchSummary(affected map[string]string) string {

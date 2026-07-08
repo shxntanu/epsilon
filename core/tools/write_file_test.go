@@ -71,7 +71,16 @@ func TestWriteFileToolBoundsLargeDiffMetadata(t *testing.T) {
 	if len(diff) > defaultWriteFileDiffMaxBytes {
 		t.Fatalf("diff metadata too large: %d", len(diff))
 	}
-	if !strings.Contains(diff, "diff omitted") {
-		t.Fatalf("expected omitted diff marker, got:\n%s", diff)
+	for _, want := range []string{
+		"diff truncated",
+		"-old",
+		"+new",
+	} {
+		if !strings.Contains(diff, want) {
+			t.Fatalf("expected bounded diff to contain %q, got:\n%s", want, diff)
+		}
+	}
+	if result.Metadata["diff_truncated"] != "true" {
+		t.Fatalf("diff_truncated = %q, want true", result.Metadata["diff_truncated"])
 	}
 }
