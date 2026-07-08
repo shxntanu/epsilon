@@ -39,8 +39,7 @@ func (t *PatchTool) Name() string {
 }
 
 func (t *PatchTool) Description() string {
-	return "Apply highly precise code modifications using structural search-and-replace blocks. " +
-		"Specify the path, the exact lines of code to find, and the new code to replace them with."
+	return "Apply precise workspace edits with structural search-and-replace blocks."
 }
 
 func (t *PatchTool) InputSchema() json.RawMessage {

@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/shxntanu/epsilon/core/types"
 )
 
 const defaultReadFileMaxBytes = 32 * 1024
+const defaultReadFilePreviewMaxBytes = 12 * 1024
 
 type readFileInput struct {
 	Path      string `json:"path"`
@@ -28,11 +30,14 @@ type readFileLineRange struct {
 type readFileData struct {
 	content       string
 	bytes         int
+	omittedBytes  int
 	truncated     bool
+	preview       bool
 	rangeEnabled  bool
 	startLine     int
 	endLine       int
 	linesReturned int
+	totalLines    int
 }
 
 // ReadFileTool reads UTF-8 text from files inside a workspace.
@@ -61,7 +66,7 @@ func (t *ReadFileTool) Name() string {
 
 // Description returns the tool description exposed to the model.
 func (t *ReadFileTool) Description() string {
-	return "Read a workspace text file. Prefer start_line/end_line for large files."
+	return "Read a workspace text file. Large full reads return a head/tail preview; prefer line ranges."
 }
 
 // InputSchema returns the tool input schema.
@@ -124,9 +129,16 @@ func (t *ReadFileTool) Run(ctx context.Context, input json.RawMessage) (*types.T
 		"path":       req.Path,
 		"bytes":      fmt.Sprintf("%d", data.bytes),
 		"truncated":  fmt.Sprintf("%t", data.truncated),
+		"preview":    fmt.Sprintf("%t", data.preview),
 		"workspace":  t.workspace.Root(),
 		"max_bytes":  fmt.Sprintf("%d", t.maxBytes),
 		"file_bytes": fmt.Sprintf("%d", info.Size()),
+	}
+	if data.omittedBytes > 0 {
+		result.Metadata["omitted_bytes"] = fmt.Sprintf("%d", data.omittedBytes)
+	}
+	if data.totalLines > 0 {
+		result.Metadata["total_lines"] = fmt.Sprintf("%d", data.totalLines)
 	}
 	if data.rangeEnabled {
 		result.Metadata["start_line"] = fmt.Sprintf("%d", data.startLine)
@@ -176,6 +188,14 @@ func (t *ReadFileTool) readFileContent(ctx context.Context, path string, lineRan
 }
 
 func (t *ReadFileTool) readFullFile(path string) (readFileData, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return readFileData{}, fmt.Errorf("stat file: %w", err)
+	}
+	if info.Size() > int64(defaultReadFilePreviewMaxBytes) {
+		return t.readFilePreview(path, info.Size())
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return readFileData{}, fmt.Errorf("open file: %w", err)
@@ -204,6 +224,143 @@ func (t *ReadFileTool) readFullFile(path string) (readFileData, error) {
 		bytes:     len(data),
 		truncated: truncated,
 	}, nil
+}
+
+type previewLine struct {
+	number int
+	text   []byte
+}
+
+func (t *ReadFileTool) readFilePreview(path string, fileBytes int64) (readFileData, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return readFileData{}, fmt.Errorf("open file: %w", err)
+	}
+
+	budget := defaultReadFilePreviewMaxBytes - 2*1024
+	if int64(budget) > t.maxBytes {
+		budget = int(t.maxBytes)
+	}
+	if budget < 1024 {
+		budget = 1024
+	}
+	headBudget := budget / 2
+	tailBudget := budget - headBudget
+
+	reader := bufio.NewReader(file)
+	var head []previewLine
+	var tail []previewLine
+	headBytes := 0
+	tailBytes := 0
+	lineNumber := 0
+	bytesRead := 0
+
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			lineNumber++
+			bytesRead += len(line)
+			if headBytes < headBudget {
+				added := appendPreviewLine(&head, lineNumber, line, headBudget-headBytes)
+				headBytes += added
+			} else {
+				tail, tailBytes = appendTailPreviewLine(tail, tailBytes, tailBudget, lineNumber, line)
+			}
+		}
+		if err == nil {
+			continue
+		}
+		if err == io.EOF {
+			break
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			return readFileData{}, fmt.Errorf("read file: %w; close file: %w", err, closeErr)
+		}
+		return readFileData{}, fmt.Errorf("read file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return readFileData{}, fmt.Errorf("close file: %w", err)
+	}
+
+	content := formatReadFilePreview(fileBytes, head, tail)
+	return readFileData{
+		content:      content,
+		bytes:        len(content),
+		omittedBytes: bytesRead - headBytes - tailBytes,
+		truncated:    true,
+		preview:      true,
+		totalLines:   lineNumber,
+	}, nil
+}
+
+func appendPreviewLine(lines *[]previewLine, number int, line []byte, remaining int) int {
+	if remaining <= 0 {
+		return 0
+	}
+	if len(line) > remaining {
+		line = append([]byte(nil), line[:remaining]...)
+	} else {
+		line = append([]byte(nil), line...)
+	}
+	*lines = append(*lines, previewLine{
+		number: number,
+		text:   line,
+	})
+	return len(line)
+}
+
+func appendTailPreviewLine(tail []previewLine, tailBytes int, budget int, number int, line []byte) ([]previewLine, int) {
+	if budget <= 0 {
+		return tail, tailBytes
+	}
+	if len(line) > budget {
+		line = line[len(line)-budget:]
+	}
+	tail = append(tail, previewLine{
+		number: number,
+		text:   append([]byte(nil), line...),
+	})
+	tailBytes += len(line)
+	for tailBytes > budget && len(tail) > 0 {
+		excess := tailBytes - budget
+		if len(tail[0].text) <= excess {
+			tailBytes -= len(tail[0].text)
+			tail = tail[1:]
+			continue
+		}
+		tail[0].text = tail[0].text[excess:]
+		tailBytes -= excess
+		break
+	}
+	return tail, tailBytes
+}
+
+func formatReadFilePreview(fileBytes int64, head []previewLine, tail []previewLine) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[read_file preview: file is %d bytes. Showing the beginning and end only. Use start_line/end_line or ripgrep for focused inspection.]\n", fileBytes)
+	writePreviewLines(&b, head)
+	if len(tail) > 0 {
+		firstTailLine := tail[0].number
+		lastHeadLine := 0
+		if len(head) > 0 {
+			lastHeadLine = head[len(head)-1].number
+		}
+		omittedLines := firstTailLine - lastHeadLine - 1
+		if omittedLines > 0 {
+			fmt.Fprintf(&b, "\n[... omitted %d lines from the middle ...]\n", omittedLines)
+		}
+		writePreviewLines(&b, tail)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func writePreviewLines(b *strings.Builder, lines []previewLine) {
+	for _, line := range lines {
+		fmt.Fprintf(b, "%6d\t%s", line.number, string(line.text))
+		if len(line.text) == 0 || line.text[len(line.text)-1] != '\n' {
+			b.WriteByte('\n')
+		}
+	}
 }
 
 func (t *ReadFileTool) readFileLineRange(ctx context.Context, path string, lineRange readFileLineRange) (readFileData, error) {
