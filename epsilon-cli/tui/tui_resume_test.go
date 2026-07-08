@@ -107,3 +107,25 @@ func TestModelStartedDoesNotAppendThinkingStatus(t *testing.T) {
 		t.Fatalf("showSpinner = true, want false when not busy")
 	}
 }
+
+func TestUsageFromEventsAccumulatesCompletedModelUsage(t *testing.T) {
+	history := []types.Event{
+		{
+			Kind:      types.EventModelMessageCompleted,
+			CreatedAt: time.Now().UTC(),
+			Usage:     &types.Usage{InputTokens: 10, OutputTokens: 3, TotalTokens: 13},
+		},
+		types.NewUserMessageAddedEvent(time.Now().UTC(), types.UserMessage("hello")),
+		{
+			Kind:      types.EventModelMessageCompleted,
+			CreatedAt: time.Now().UTC(),
+			Usage:     &types.Usage{InputTokens: 7, OutputTokens: 5, TotalTokens: 12},
+		},
+	}
+
+	got := usageFromEvents(history)
+	want := types.Usage{InputTokens: 17, OutputTokens: 8, TotalTokens: 25}
+	if got != want {
+		t.Fatalf("usage = %#v, want %#v", got, want)
+	}
+}

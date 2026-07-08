@@ -243,6 +243,7 @@ func (m *model) applyResumeSession(msg resumeSessionMsg) tea.Cmd {
 	m.subscription = msg.sub
 	m.events = msg.sub.Events()
 	m.entries = hydrateTranscriptEntries(msg.history)
+	m.sessionUsage = usageFromEvents(msg.history)
 	m.pendingUsers = nil
 	m.streaming = -1
 	m.permission = nil

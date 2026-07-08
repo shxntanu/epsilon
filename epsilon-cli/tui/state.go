@@ -72,6 +72,10 @@ type transcriptState struct {
 	streaming    int
 }
 
+type usageState struct {
+	sessionUsage types.Usage
+}
+
 type layoutState struct {
 	width          int
 	height         int

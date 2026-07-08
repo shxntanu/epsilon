@@ -140,6 +140,7 @@ type model struct {
 	inputState
 	overlayState
 	transcriptState
+	usageState
 	layoutState
 	activityState
 	scrollbackState
@@ -390,6 +391,9 @@ func newModel(ctx context.Context, sess *session.Session, sub *events.Subscripti
 		transcriptState: transcriptState{
 			streaming: -1,
 			entries:   entries,
+		},
+		usageState: usageState{
+			sessionUsage: usageFromEvents(initialHistory),
 		},
 		layoutState: layoutState{
 			showBackground: false,
@@ -804,11 +808,11 @@ func (m *model) resize() {
 }
 
 func (m model) renderContextWidget() string {
-	return newContextWidget(m.contextView(), m.width, m.selectedModelInfo()).View()
+	return newContextWidget(m.contextView(), m.width, m.selectedModelInfo(), m.sessionUsage).View()
 }
 
 func (m model) renderContextPanel() string {
-	return newContextPanel(m.contextView(), m.width, 0, m.selectedModelInfo()).Panel()
+	return newContextPanel(m.contextView(), m.width, 0, m.selectedModelInfo(), m.sessionUsage).Panel()
 }
 
 func (m model) selectedModelInfo() *types.ModelInfo {
@@ -995,6 +999,23 @@ func (m *model) addEvent(event types.Event) {
 	m.applyEvent(event, true)
 }
 
+func usageFromEvents(events []types.Event) types.Usage {
+	var usage types.Usage
+	for _, event := range events {
+		if event.Kind == types.EventModelMessageCompleted && event.Usage != nil {
+			usage = addUsage(usage, *event.Usage)
+		}
+	}
+	return usage
+}
+
+func addUsage(total types.Usage, next types.Usage) types.Usage {
+	total.InputTokens += next.InputTokens
+	total.OutputTokens += next.OutputTokens
+	total.TotalTokens += next.TotalTokens
+	return total
+}
+
 func (m *model) applyEvent(event types.Event, interactive bool) {
 	switch event.Kind {
 	case types.EventUserMessageAdded:
@@ -1018,6 +1039,9 @@ func (m *model) applyEvent(event types.Event, interactive bool) {
 		}
 	case types.EventModelMessageCompleted:
 		m.showSpinner = false
+		if event.Usage != nil {
+			m.sessionUsage = addUsage(m.sessionUsage, *event.Usage)
+		}
 		if event.Message != nil {
 			text := textFromContent(event.Message.Content)
 			if text != "" {

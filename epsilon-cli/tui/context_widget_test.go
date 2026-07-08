@@ -15,7 +15,7 @@ func TestContextWidgetView(t *testing.T) {
 		RemainingTokens:    75,
 		PercentUsed:        0.25,
 		TokensUntilCompact: 60,
-	}, 80, nil).View()
+	}, 80, nil, types.Usage{}).View()
 
 	for _, want := range []string{"context 25.0%", "25/100 tokens", "60 until compact"} {
 		if !strings.Contains(view, want) {
@@ -36,6 +36,7 @@ func TestContextPanelView(t *testing.T) {
 			OutputCostPer1KTokens: 0.01,
 		},
 	}
+	usage := types.Usage{InputTokens: 100, OutputTokens: 50, TotalTokens: 150}
 	view := newContextPanel(contextwindow.Summary{
 		MaxTokens:          100,
 		UsedTokens:         50,
@@ -50,11 +51,32 @@ func TestContextPanelView(t *testing.T) {
 			{Label: "user", Tokens: 20},
 			{Label: "tool call: read_file", Tokens: 30},
 		},
-	}, 36, 12, model).Panel()
+	}, 36, 12, model, usage).Panel()
 
-	for _, want := range []string{"Context", "Model", "gpt-4o", "128000", "Breakdown", "User messages", "Tool calls", "Recent"} {
+	for _, want := range []string{"Context", "Model", "gpt-4o", "128000", "Session", "cost: $0.000750", "Breakdown", "User messages", "Tool calls", "Recent"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("context panel missing %q in %q", want, view)
 		}
+	}
+}
+
+func TestContextWidgetShowsSessionCost(t *testing.T) {
+	model := &types.ModelInfo{
+		ID: "gpt-4o",
+		Pricing: types.ModelPricing{
+			InputCostPerToken:  0.0000025,
+			OutputCostPerToken: 0.00001,
+		},
+	}
+	view := newContextWidget(contextwindow.Summary{
+		MaxTokens:          100,
+		UsedTokens:         25,
+		RemainingTokens:    75,
+		PercentUsed:        0.25,
+		TokensUntilCompact: 60,
+	}, 80, model, types.Usage{InputTokens: 100, OutputTokens: 50}).View()
+
+	if !strings.Contains(view, "cost: $0.000750") {
+		t.Fatalf("context widget missing cost in %q", view)
 	}
 }

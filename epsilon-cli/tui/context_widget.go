@@ -18,23 +18,27 @@ const (
 type contextWidget struct {
 	summary contextwindow.Summary
 	model   *types.ModelInfo
+	usage   types.Usage
 	width   int
 	height  int
 }
 
-func newContextWidget(summary contextwindow.Summary, width int, model *types.ModelInfo) contextWidget {
+func newContextWidget(summary contextwindow.Summary, width int, model *types.ModelInfo,
+	usage types.Usage) contextWidget {
 	return contextWidget{
 		summary: summary,
 		model:   model,
+		usage:   usage,
 		width:   max(20, width),
 	}
 }
 
 func newContextPanel(summary contextwindow.Summary, width int, height int,
-	model *types.ModelInfo) contextWidget {
+	model *types.ModelInfo, usage types.Usage) contextWidget {
 	return contextWidget{
 		summary: summary,
 		model:   model,
+		usage:   usage,
 		width:   max(contextPanelMinWidth, width),
 		height:  max(3, height),
 	}
@@ -47,7 +51,11 @@ func (w contextWidget) View() string {
 	if w.summary.NeedsCompaction {
 		until = "compaction due"
 	}
-	line := label + " | " + details + " | " + until
+	parts := []string{label, details, until}
+	if cost := sessionCostLine(w.model, w.usage); cost != "" {
+		parts = append(parts, cost)
+	}
+	line := strings.Join(parts, " | ")
 
 	style := lipgloss.NewStyle().
 		Foreground(tuiInkStrong).
@@ -83,6 +91,11 @@ func (w contextWidget) Panel() string {
 		modelLine := strings.Join(modelLines(*w.model), " | ")
 		lines = append(lines, "", subheadingStyle.Render("Model"))
 		lines = append(lines, wrapLine(modelLine, innerWidth)...)
+	}
+
+	if cost := sessionCostLine(w.model, w.usage); cost != "" {
+		lines = append(lines, "", subheadingStyle.Render("Session"))
+		lines = append(lines, wrapLine(cost, innerWidth)...)
 	}
 
 	lines = append(lines,
@@ -154,6 +167,51 @@ func pricingLine(input float64, output float64) string {
 		return ""
 	}
 	return fmt.Sprintf("price/1M: $%.4g in / $%.4g out", input*1000, output*1000)
+}
+
+func sessionCostLine(model *types.ModelInfo, usage types.Usage) string {
+	cost := sessionCost(model, usage)
+	if cost <= 0 {
+		return ""
+	}
+	return "cost: " + formatCost(cost)
+}
+
+func sessionCost(model *types.ModelInfo, usage types.Usage) float64 {
+	if model == nil {
+		return 0
+	}
+	inputCost := tokenCost(model.Pricing.InputCostPerToken,
+		model.Pricing.InputCostPer1KTokens)
+	outputCost := tokenCost(model.Pricing.OutputCostPerToken,
+		model.Pricing.OutputCostPer1KTokens)
+	if inputCost == 0 && outputCost == 0 {
+		return 0
+	}
+	return float64(usage.InputTokens)*inputCost + float64(usage.OutputTokens)*outputCost
+}
+
+func tokenCost(perToken float64, per1K float64) float64 {
+	if perToken > 0 {
+		return perToken
+	}
+	if per1K > 0 {
+		return per1K / 1000
+	}
+	return 0
+}
+
+func formatCost(cost float64) string {
+	switch {
+	case cost >= 1:
+		return fmt.Sprintf("$%.2f", cost)
+	case cost >= 0.01:
+		return fmt.Sprintf("$%.4f", cost)
+	case cost >= 0.0001:
+		return fmt.Sprintf("$%.6f", cost)
+	default:
+		return fmt.Sprintf("$%.8f", cost)
+	}
 }
 
 func bucketLine(bucket contextwindow.Bucket, width int) string {
