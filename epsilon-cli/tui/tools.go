@@ -160,14 +160,21 @@ func (m model) renderDiff(diff string) string {
 }
 
 type diffSummary struct {
-	path    string
-	added   int
-	removed int
+	path          string
+	added         int
+	removed       int
+	omitted       bool
+	omittedReason string
 }
 
 func summarizeDiff(diff string) diffSummary {
 	summary := diffSummary{path: "changes"}
 	for _, line := range strings.Split(strings.TrimRight(diff, "\n"), "\n") {
+		if reason, ok := diffOmittedReason(line); ok {
+			summary.omitted = true
+			summary.omittedReason = reason
+			continue
+		}
 		switch {
 		case strings.HasPrefix(line, "+++ "):
 			if path := cleanDiffPath(strings.TrimSpace(strings.TrimPrefix(line, "+++ "))); path != "" &&
@@ -198,6 +205,13 @@ func cleanDiffPath(path string) string {
 }
 
 func (m model) renderDiffTitle(summary diffSummary) string {
+	if summary.omitted {
+		return m.styles.tool.Render("•") + " " +
+			lipgloss.NewStyle().Background(tuiBackground).Foreground(tuiInkStrong).Bold(true).Render("Diff omitted") +
+			" " +
+			lipgloss.NewStyle().Background(tuiBackground).Foreground(tuiInk).Render(summary.path)
+	}
+
 	verb := "Edited"
 	if summary.removed == 0 && summary.added > 0 {
 		verb = "Added"
@@ -228,6 +242,9 @@ func (m model) renderDiffBody(diff string, summary diffSummary) string {
 	lineNumberWidth := max(3, len(strconv.Itoa(max(1, maxChangedLine(lines)))))
 	rowWidth := max(20, m.messageWidth())
 	for _, line := range lines {
+		if _, ok := diffOmittedReason(line); ok {
+			continue
+		}
 		switch {
 		case strings.HasPrefix(line, "diff --git") ||
 			strings.HasPrefix(line, "index ") ||
@@ -255,8 +272,8 @@ func (m model) renderDiffBody(diff string, summary diffSummary) string {
 			rendered = append(rendered, m.styles.diffMeta.Render(line))
 		default:
 			text := line
-			if strings.HasPrefix(text, " ") {
-				text = strings.TrimPrefix(text, " ")
+			if after, ok := strings.CutPrefix(text, " "); ok {
+				text = after
 			}
 			rendered = append(rendered, m.renderDiffContextRow(newLine, text, lineNumberWidth, rowWidth))
 			oldLine++
@@ -264,10 +281,27 @@ func (m model) renderDiffBody(diff string, summary diffSummary) string {
 		}
 	}
 
+	if summary.omitted {
+		return m.styles.diffMeta.Render(summary.omittedReason)
+	}
 	if len(rendered) == 0 && (summary.added > 0 || summary.removed > 0) {
 		return m.styles.diffMeta.Render("diff omitted")
 	}
 	return strings.Join(rendered, "\n")
+}
+
+func diffOmittedReason(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "[diff omitted") {
+		return "", false
+	}
+	reason := strings.TrimPrefix(line, "[")
+	reason = strings.TrimSuffix(reason, "]")
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "diff omitted"
+	}
+	return reason, true
 }
 
 func parseDiffHunkStart(line string) (int, int, bool) {
