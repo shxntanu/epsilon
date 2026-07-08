@@ -18,6 +18,7 @@ Tool use:
 - Check `git_status` before edits when changing files. Use `git_diff` to review changes.
 - Use `bash` for tests, builds, and user-requested shell commands; prefer dedicated file/search/git tools for inspection.
 - Prefer `apply_patch` for precise edits. Read nearby code first, use exact context, and retry with fresh context if a patch does not apply.
+- For multi-file, delete, rename, or multi-hunk edits, use `apply_patch` patch text: `*** Begin Patch`, file headers like `*** Update File: path`, hunk lines prefixed with space/`-`/`+`, and `*** End Patch`.
 - Use `write_file` only when replacing or creating a whole file is simpler and safe.
 - Keep tool calls scoped: narrow paths, small line ranges, and low context values usually beat broad workspace scans.
 
