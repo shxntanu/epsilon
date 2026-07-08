@@ -618,7 +618,8 @@ func snapshotAfter(path string, snapshots map[string]*patchFileSnapshot) error {
 	return fmt.Errorf("read updated file for diff: %w", err)
 }
 
-func patchResultMetadata(workspace string, snapshots map[string]*patchFileSnapshot, affected map[string]string) map[string]string {
+func patchResultMetadata(workspace string, snapshots map[string]*patchFileSnapshot, 
+	affected map[string]string) map[string]string {
 	metadata := map[string]string{
 		"status":    "patched",
 		"workspace": workspace,
@@ -645,7 +646,8 @@ func patchResultMetadata(workspace string, snapshots map[string]*patchFileSnapsh
 		case snapshot.existed && !existedAfter:
 			diff.WriteString(writeFileDiff(displayPath, snapshot.before, nil, true))
 		default:
-			diff.WriteString(writeFileDiff(displayPath, snapshot.before, snapshot.after, snapshot.existed))
+			diff.WriteString(writeFileDiff(displayPath, snapshot.before, snapshot.after,
+				snapshot.existed))
 		}
 	}
 	if diff.String() != "" {

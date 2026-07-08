@@ -163,6 +163,28 @@ func TestDefaultRegistryActions(t *testing.T) {
 		t.Fatalf("resume result = %#v, handled %v", result, handled)
 	}
 
+	result, handled, err = registry.Execute(context.Background(), "/new", Execution{})
+	if err != nil {
+		t.Fatalf("execute new: %v", err)
+	}
+	if !handled || result.Action != ActionNewSession {
+		t.Fatalf("new result = %#v, handled %v", result, handled)
+	}
+
+	result, handled, err = registry.Execute(context.Background(), "/discard",
+		Execution{SessionID: "session_123"})
+	if err != nil {
+		t.Fatalf("execute discard: %v", err)
+	}
+	if !handled || result.Action != ActionDiscardSession || result.Session != "session_123" {
+		t.Fatalf("discard result = %#v, handled %v", result, handled)
+	}
+
+	_, _, err = registry.Execute(context.Background(), "/discard", Execution{})
+	if err == nil {
+		t.Fatalf("discard without current session should fail")
+	}
+
 	result, handled, err = registry.Execute(context.Background(), "/rename hello world",
 		Execution{SessionID: "session_123"})
 	if err != nil {

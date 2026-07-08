@@ -31,6 +31,11 @@ type SessionRenamer interface {
 	RenameSession(ctx context.Context, sessionID string, title string) (bool, error)
 }
 
+// SessionDeleter removes persisted session events and metadata.
+type SessionDeleter interface {
+	DeleteSession(ctx context.Context, sessionID string) (bool, error)
+}
+
 // SessionChecker reports whether a persisted session record exists, even when
 // it has no conversation events yet.
 type SessionChecker interface {

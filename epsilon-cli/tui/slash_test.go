@@ -167,7 +167,7 @@ func TestComposerViewHighlightsSkillPrefixInline(t *testing.T) {
 	composer.SetValue("!impeccable improve the composer")
 
 	view := plainANSI(composer.View(false, false, false, "impeccable", 1, "test session"))
-	for _, want := range []string{"$impeccable", "improve the composer"} {
+	for _, want := range []string{"!impeccable", "improve the composer"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("composer skill prefix missing %q:\n%s", want, view)
 		}

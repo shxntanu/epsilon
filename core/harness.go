@@ -158,6 +158,39 @@ func (h *Harness) GetSession(id string) (*session.Session, bool) {
 	return sess, ok
 }
 
+func (h *Harness) CloseSession(ctx context.Context, sessionID string) error {
+	sess, ok := h.GetSession(sessionID)
+	if !ok {
+		return nil
+	}
+	return sess.Close(ctx)
+}
+
+func (h *Harness) DeleteSession(ctx context.Context, sessionID string) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return false, fmt.Errorf("session ID cannot be empty")
+	}
+
+	h.mu.Lock()
+	sess, loaded := h.sessions[sessionID]
+	delete(h.sessions, sessionID)
+	h.mu.Unlock()
+
+	if loaded {
+		_ = sess.Close(ctx)
+	}
+
+	if h.eventStore == nil {
+		return loaded, nil
+	}
+	deleter, ok := h.eventStore.(events.SessionDeleter)
+	if !ok {
+		return loaded, fmt.Errorf("event store does not support session deletion")
+	}
+	deleted, err := deleter.DeleteSession(ctx, sessionID)
+	return loaded || deleted, err
+}
+
 func (h *Harness) ListSessions(ctx context.Context) ([]events.SessionInfo, error) {
 	known := make(map[string]events.SessionInfo)
 	if lister, ok := h.eventStore.(events.SessionLister); ok {

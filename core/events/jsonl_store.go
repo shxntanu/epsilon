@@ -285,6 +285,31 @@ func (s *JSONLStore) metadataPath(sessionID string) (string, error) {
 	return filepath.Join(s.baseDir, sessionID, metadataFileName), nil
 }
 
+// DeleteSession removes a session directory and all persisted session data.
+func (s *JSONLStore) DeleteSession(ctx context.Context, sessionID string) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, fmt.Errorf("delete session cancelled: %w", ctx.Err())
+	default:
+	}
+
+	eventPath, err := s.eventsPath(sessionID)
+	if err != nil {
+		return false, err
+	}
+	sessionDir := filepath.Dir(eventPath)
+	if _, err := os.Stat(sessionDir); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("stat session directory: %w", err)
+	}
+
+	if err := os.RemoveAll(sessionDir); err != nil {
+		return false, fmt.Errorf("delete session directory: %w", err)
+	}
+	return true, nil
+}
+
 // RenameSession persists a session title in per-session metadata.
 func (s *JSONLStore) RenameSession(ctx context.Context, sessionID string, title string) (bool, error) {
 	select {

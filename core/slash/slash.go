@@ -22,6 +22,8 @@ const (
 	ActionSetModel        Action = "set_model"
 	ActionSetEffort       Action = "set_effort"
 	ActionSetPlanMode     Action = "set_plan_mode"
+	ActionNewSession      Action = "new_session"
+	ActionDiscardSession  Action = "discard_session"
 	ActionPickSession     Action = "pick_session"
 	ActionRenameSession   Action = "rename_session"
 	ActionResumeChat      Action = "resume_chat"
@@ -232,6 +234,29 @@ func NewDefaultRegistry() *Registry {
 				Action:  ActionSetPlanMode,
 				Bool:    value,
 				Message: "plan mode " + onOff(value),
+			}, nil
+		},
+	})
+	registry.Register(Command{
+		Name:        "new",
+		Usage:       "/new",
+		Description: "save this session and start a new one",
+		Handler: func(context.Context, Execution) (Result, error) {
+			return Result{Action: ActionNewSession, Message: "starting new session"}, nil
+		},
+	})
+	registry.Register(Command{
+		Name:        "discard",
+		Usage:       "/discard",
+		Description: "discard and delete the current session",
+		Handler: func(_ context.Context, exec Execution) (Result, error) {
+			if strings.TrimSpace(exec.SessionID) == "" {
+				return Result{}, fmt.Errorf("cannot discard session without a current session")
+			}
+			return Result{
+				Action:  ActionDiscardSession,
+				Session: exec.SessionID,
+				Message: "discarding current session",
 			}, nil
 		},
 	})

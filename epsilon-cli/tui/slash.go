@@ -102,6 +102,10 @@ func (m *model) applySlashResult(result slash.Result, err error) tea.Cmd {
 		}
 		m.status = "plan:" + onOff(currentBool(m.currentPlanMode))
 		m.appendSlashMessage(result.Message)
+	case slash.ActionNewSession:
+		return m.startNewChat(false)
+	case slash.ActionDiscardSession:
+		return m.startNewChat(true)
 	case slash.ActionResumeChat:
 		return m.resumeChat(events.SessionInfo{ID: result.Session})
 	case slash.ActionRenameSession:

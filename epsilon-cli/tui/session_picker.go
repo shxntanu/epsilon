@@ -176,6 +176,53 @@ func (m *model) resumeChat(sessionInfo events.SessionInfo) tea.Cmd {
 	}
 }
 
+func (m *model) startNewChat(discardCurrent bool) tea.Cmd {
+	if m.busy {
+		m.appendPlain(m.styles.error.Render("cannot start a new session while model is thinking"))
+		return nil
+	}
+	if m.startSession == nil {
+		m.appendPlain(m.styles.error.Render("new sessions are not available"))
+		return nil
+	}
+
+	currentSessionID := m.session.ID()
+	m.status = "starting"
+	m.dirty = true
+	startSession := m.startSession
+	closeSession := m.closeSession
+	deleteSession := m.deleteSession
+	ctx := m.ctx
+	return func() tea.Msg {
+		if discardCurrent {
+			if deleteSession == nil {
+				return resumeSessionMsg{err: fmt.Errorf("discard is not available")}
+			}
+			if _, err := deleteSession(ctx, currentSessionID); err != nil {
+				return resumeSessionMsg{err: err}
+			}
+		} else if closeSession != nil {
+			if err := closeSession(ctx, currentSessionID); err != nil {
+				return resumeSessionMsg{err: err}
+			}
+		}
+
+		sess, err := startSession(ctx)
+		if err != nil {
+			return resumeSessionMsg{err: err}
+		}
+		sub, err := sess.Subscribe()
+		if err != nil {
+			return resumeSessionMsg{sessionID: sess.ID(), err: err}
+		}
+		return resumeSessionMsg{
+			sessionID: sess.ID(),
+			session:   sess,
+			sub:       sub,
+		}
+	}
+}
+
 func (m *model) applyResumeSession(msg resumeSessionMsg) tea.Cmd {
 	if msg.err != nil {
 		m.status = "ready"

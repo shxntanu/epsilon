@@ -27,7 +27,10 @@ type providerState struct {
 	modelInfo       func() (types.ModelInfo, bool)
 	listModels      func(context.Context) ([]types.ModelInfo, error)
 	listSessions    func(context.Context) ([]events.SessionInfo, error)
+	startSession    func(context.Context) (*session.Session, error)
 	resumeSession   func(context.Context, string) (*session.Session, error)
+	closeSession    func(context.Context, string) error
+	deleteSession   func(context.Context, string) (bool, error)
 	currentModel    func() string
 	currentEffort   func() string
 	currentPlanMode func() bool
