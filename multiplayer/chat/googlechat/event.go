@@ -105,12 +105,18 @@ type UserMention struct {
 
 // Attachment is the subset of Google Chat attachment metadata preserved by normalization.
 type Attachment struct {
-	Name         string `json:"name,omitempty"`
-	ContentName  string `json:"contentName,omitempty"`
-	ContentType  string `json:"contentType,omitempty"`
-	ThumbnailURI string `json:"thumbnailUri,omitempty"`
-	DownloadURI  string `json:"downloadUri,omitempty"`
-	Source       string `json:"source,omitempty"`
+	Name              string            `json:"name,omitempty"`
+	ContentName       string            `json:"contentName,omitempty"`
+	ContentType       string            `json:"contentType,omitempty"`
+	ThumbnailURI      string            `json:"thumbnailUri,omitempty"`
+	DownloadURI       string            `json:"downloadUri,omitempty"`
+	Source            string            `json:"source,omitempty"`
+	AttachmentDataRef AttachmentDataRef `json:"attachmentDataRef,omitempty"`
+}
+
+// AttachmentDataRef identifies media bytes retrievable through media.download.
+type AttachmentDataRef struct {
+	ResourceName string `json:"resourceName,omitempty"`
 }
 
 // Event is an internal normalized representation of a Google Chat interaction event.
@@ -179,6 +185,9 @@ func Normalize(input InteractionEvent) (*chat.Event, error) {
 			ThumbnailURI: attachment.ThumbnailURI,
 			DownloadURI:  attachment.DownloadURI,
 			Source:       attachment.Source,
+			Metadata: map[string]string{
+				"attachment_data_resource_name": attachment.AttachmentDataRef.ResourceName,
+			},
 		})
 	}
 
