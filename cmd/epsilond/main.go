@@ -14,6 +14,8 @@ import (
 	"github.com/shxntanu/epsilon/multiplayer/chat/googlechat"
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
 	"github.com/shxntanu/epsilon/multiplayer/store"
+	temporalorchestrator "github.com/shxntanu/epsilon/multiplayer/temporal"
+	"go.temporal.io/sdk/client"
 )
 
 func main() {
@@ -62,8 +64,25 @@ func run() error {
 			TokenProvider: googlechat.StaticTokenProvider{Token: cfg.GoogleChatAccessToken},
 		}
 	}
+	chatOrchestrator := epsilond.ChatOrchestrator(epsilond.BootstrapOrchestrator{})
+	var temporalClient client.Client
+	if cfg.TemporalAddress != "" {
+		temporalClient, err = client.Dial(client.Options{
+			HostPort:  cfg.TemporalAddress,
+			Namespace: cfg.TemporalNamespace,
+		})
+		if err != nil {
+			return fmt.Errorf("dial temporal: %w", err)
+		}
+		defer temporalClient.Close()
+		orchestratorClient, err := temporalorchestrator.NewClient(temporalClient, cfg.TemporalTaskQueue)
+		if err != nil {
+			return err
+		}
+		chatOrchestrator = epsilond.TemporalOrchestrator{Client: orchestratorClient}
+	}
 	options = append(options, epsilond.WithIngestor(epsilond.BootstrapIngestor{
-		Orchestrator: epsilond.BootstrapOrchestrator{},
+		Orchestrator: chatOrchestrator,
 		ReplyClient:  replyClient,
 		Store:        pgStore,
 	}))
