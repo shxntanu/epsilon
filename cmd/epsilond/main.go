@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shxntanu/epsilon/multiplayer/chat/googlechat"
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
 	"github.com/shxntanu/epsilon/multiplayer/store"
 )
@@ -46,14 +47,27 @@ func run() error {
 		checker.Store = gormStore
 		pgStore = gormStore
 	}
-	service := epsilond.NewServer(cfg,
+	options := []epsilond.ServerOption{
 		epsilond.WithLogger(logger),
 		epsilond.WithDependencyChecker(checker),
-		epsilond.WithIngestor(epsilond.BootstrapIngestor{
-			Orchestrator: epsilond.BootstrapOrchestrator{},
-			Store:        pgStore,
-		}),
-	)
+	}
+	if cfg.GoogleChatAudience != "" {
+		options = append(options, epsilond.WithRequestVerifier(googlechat.IDTokenVerifier{
+			Audience: cfg.GoogleChatAudience,
+		}))
+	}
+	var replyClient *googlechat.Client
+	if cfg.GoogleChatAccessToken != "" {
+		replyClient = &googlechat.Client{
+			TokenProvider: googlechat.StaticTokenProvider{Token: cfg.GoogleChatAccessToken},
+		}
+	}
+	options = append(options, epsilond.WithIngestor(epsilond.BootstrapIngestor{
+		Orchestrator: epsilond.BootstrapOrchestrator{},
+		ReplyClient:  replyClient,
+		Store:        pgStore,
+	}))
+	service := epsilond.NewServer(cfg, options...)
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPAddr,
 		Handler: service.Handler(),

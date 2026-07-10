@@ -15,6 +15,7 @@ import (
 type BootstrapIngestor struct {
 	Orchestrator ChatOrchestrator
 	Parser       chat.Parser
+	ReplyClient  chat.Client
 	Store        store.Store
 }
 
@@ -84,6 +85,16 @@ func (i BootstrapIngestor) IngestGoogleChatEvent(ctx context.Context, event RawG
 	message := handle.Message
 	if message == "" {
 		message = "Epsilon accepted the task and will report back in this thread."
+	}
+	if i.ReplyClient != nil {
+		if err := i.ReplyClient.Reply(ctx, chat.Reply{
+			Platform:   normalized.Platform,
+			SpaceName:  normalized.SpaceName,
+			ThreadName: normalized.ThreadName,
+			Text:       message,
+		}); err != nil {
+			return IngestResult{}, err
+		}
 	}
 	return IngestResult{
 		Accepted: true,

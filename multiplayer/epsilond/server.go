@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/shxntanu/epsilon/multiplayer/chat"
 )
 
 // Ingestor accepts raw Google Chat events after HTTP-level validation.
@@ -40,6 +42,7 @@ type Server struct {
 	logger   *slog.Logger
 	ingestor Ingestor
 	checker  DependencyChecker
+	verifier chat.RequestVerifier
 }
 
 // ServerOption customizes a Server.
@@ -65,6 +68,13 @@ func WithIngestor(ingestor Ingestor) ServerOption {
 func WithDependencyChecker(checker DependencyChecker) ServerOption {
 	return func(s *Server) {
 		s.checker = checker
+	}
+}
+
+// WithRequestVerifier configures platform request verification.
+func WithRequestVerifier(verifier chat.RequestVerifier) ServerOption {
+	return func(s *Server) {
+		s.verifier = verifier
 	}
 }
 
@@ -116,6 +126,13 @@ func (s *Server) handleGoogleChatEvent(w http.ResponseWriter, r *http.Request) {
 			"error": "google chat ingestor is not configured",
 		})
 		return
+	}
+	if s.verifier != nil {
+		if err := s.verifier.Verify(r.Context(), r); err != nil {
+			s.logger.Warn("google chat request verification failed", "error", err)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
 	}
 	defer r.Body.Close()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.cfg.MaxEventBodyBytes))

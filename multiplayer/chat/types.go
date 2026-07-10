@@ -75,6 +75,11 @@ type Client interface {
 	Reply(ctx context.Context, reply Reply) error
 }
 
+// RequestVerifier verifies platform-specific HTTP requests before ingestion.
+type RequestVerifier interface {
+	Verify(ctx context.Context, r *http.Request) error
+}
+
 // Adapter combines parsing and reply behavior for one platform.
 type Adapter interface {
 	Parser
