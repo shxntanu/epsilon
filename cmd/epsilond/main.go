@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shxntanu/epsilon/multiplayer/chat"
 	"github.com/shxntanu/epsilon/multiplayer/chat/googlechat"
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
 	"github.com/shxntanu/epsilon/multiplayer/store"
@@ -58,7 +59,7 @@ func run() error {
 			Audience: cfg.GoogleChatAudience,
 		}))
 	}
-	var replyClient *googlechat.Client
+	var replyClient chat.Client
 	if cfg.GoogleChatAccessToken != "" {
 		replyClient = &googlechat.Client{
 			TokenProvider: googlechat.StaticTokenProvider{Token: cfg.GoogleChatAccessToken},

@@ -44,8 +44,18 @@ type Client struct {
 	HTTPClient    *http.Client
 }
 
+func (c *Client) configured() error {
+	if c == nil {
+		return fmt.Errorf("googlechat: client is nil")
+	}
+	return nil
+}
+
 // GetAttachment retrieves Google Chat attachment metadata by resource name.
-func (c Client) GetAttachment(ctx context.Context, name string) (Attachment, error) {
+func (c *Client) GetAttachment(ctx context.Context, name string) (Attachment, error) {
+	if err := c.configured(); err != nil {
+		return Attachment{}, err
+	}
 	name = strings.Trim(strings.TrimSpace(name), "/")
 	if name == "" {
 		return Attachment{}, fmt.Errorf("googlechat: attachment name is empty")
@@ -62,7 +72,10 @@ func (c Client) GetAttachment(ctx context.Context, name string) (Attachment, err
 }
 
 // DownloadMedia downloads uploaded media bytes by attachmentDataRef.resourceName.
-func (c Client) DownloadMedia(ctx context.Context, resourceName string) ([]byte, error) {
+func (c *Client) DownloadMedia(ctx context.Context, resourceName string) ([]byte, error) {
+	if err := c.configured(); err != nil {
+		return nil, err
+	}
 	resourceName = strings.Trim(strings.TrimSpace(resourceName), "/")
 	if resourceName == "" {
 		return nil, fmt.Errorf("googlechat: media resource name is empty")
@@ -71,7 +84,10 @@ func (c Client) DownloadMedia(ctx context.Context, resourceName string) ([]byte,
 }
 
 // Reply posts text into an existing Google Chat thread.
-func (c Client) Reply(ctx context.Context, reply chat.Reply) error {
+func (c *Client) Reply(ctx context.Context, reply chat.Reply) error {
+	if err := c.configured(); err != nil {
+		return err
+	}
 	if reply.Platform != "" && reply.Platform != chat.PlatformGoogleChat {
 		return fmt.Errorf("googlechat: unsupported reply platform %q", reply.Platform)
 	}
@@ -114,7 +130,7 @@ func (c Client) Reply(ctx context.Context, reply chat.Reply) error {
 	return nil
 }
 
-func (c Client) get(ctx context.Context, target string) ([]byte, error) {
+func (c *Client) get(ctx context.Context, target string) ([]byte, error) {
 	token, err := c.bearerToken(ctx)
 	if err != nil {
 		return nil, err
@@ -143,7 +159,7 @@ func (c Client) get(ctx context.Context, target string) ([]byte, error) {
 	return body, nil
 }
 
-func (c Client) bearerToken(ctx context.Context) (string, error) {
+func (c *Client) bearerToken(ctx context.Context) (string, error) {
 	tokenProvider := c.TokenProvider
 	if tokenProvider == nil {
 		return "", fmt.Errorf("googlechat: token provider is not configured")
@@ -151,7 +167,7 @@ func (c Client) bearerToken(ctx context.Context) (string, error) {
 	return tokenProvider.BearerToken(ctx)
 }
 
-func (c Client) baseURL() string {
+func (c *Client) baseURL() string {
 	baseURL := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
 	if baseURL == "" {
 		return defaultAPIBaseURL
