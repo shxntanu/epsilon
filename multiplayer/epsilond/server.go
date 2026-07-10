@@ -27,9 +27,12 @@ type RawGoogleChatEvent struct {
 
 // IngestResult describes how epsilond accepted an incoming event.
 type IngestResult struct {
-	Accepted bool   `json:"accepted"`
-	Message  string `json:"message,omitempty"`
-	TaskID   string `json:"task_id,omitempty"`
+	Accepted   bool   `json:"accepted"`
+	Message    string `json:"message,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	SpaceID    string `json:"space_id,omitempty"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	WorkflowID string `json:"workflow_id,omitempty"`
 }
 
 // DependencyChecker reports whether service dependencies are ready.

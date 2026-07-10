@@ -97,9 +97,12 @@ func (i BootstrapIngestor) IngestGoogleChatEvent(ctx context.Context, event RawG
 		}
 	}
 	return IngestResult{
-		Accepted: true,
-		Message:  message,
-		TaskID:   handle.TaskID,
+		Accepted:   true,
+		Message:    message,
+		TaskID:     handle.TaskID,
+		SpaceID:    spaceID(normalized),
+		ThreadID:   threadID(normalized),
+		WorkflowID: handle.WorkflowID,
 	}, nil
 }
 
