@@ -48,6 +48,16 @@ func (r *Registry) Register(tool Tool) error {
 	return nil
 }
 
+// RegisterAll adds multiple tools to the registry in order.
+func (r *Registry) RegisterAll(toolList ...Tool) error {
+	for _, tool := range toolList {
+		if err := r.Register(tool); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Get returns a tool by name.
 func (r *Registry) Get(name string) (Tool, bool) {
 	if name == "" {

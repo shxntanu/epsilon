@@ -10,8 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	coreproviders "github.com/shxntanu/epsilon/core/providers"
 	"github.com/shxntanu/epsilon/multiplayer/chat/googlechat"
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
+	"github.com/shxntanu/epsilon/multiplayer/harnessworker"
 	"github.com/shxntanu/epsilon/multiplayer/sandbox"
 	"github.com/shxntanu/epsilon/multiplayer/store"
 	"github.com/shxntanu/epsilon/multiplayer/temporal/activities"
@@ -105,11 +107,29 @@ func run() error {
 
 func buildSandboxRunner(cfg epsilond.Config) (sandbox.Runner, error) {
 	switch cfg.SandboxBackend {
-	case "", "srt":
+	case "srt":
 		return sandbox.SRTRunner{
 			Binary:      cfg.SRTBinary,
 			SettingsDir: filepath.Join(cfg.WorkspaceRoot, ".srt-settings"),
 		}, nil
+	case "", "harness":
+		provider, err := coreproviders.New(coreproviders.Config{
+			Name:           cfg.WorkerProvider,
+			Model:          cfg.WorkerModel,
+			LiteLLMBaseURL: cfg.LiteLLMBaseURL,
+			LiteLLMAPIKey:  cfg.LiteLLMAPIKey,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return harnessworker.New(harnessworker.Config{
+			WorkspaceRoot: cfg.WorkspaceRoot,
+			SessionDir:    filepath.Join(cfg.WorkspaceRoot, ".harness-sessions"),
+			Provider:      provider,
+			Model:         cfg.WorkerModel,
+			Effort:        cfg.WorkerEffort,
+			SystemPrompt:  cfg.WorkerSystemPrompt,
+		})
 	case "noop":
 		return sandbox.NoopRunner{}, nil
 	default:

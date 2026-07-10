@@ -14,6 +14,7 @@ const (
 	defaultMaxEventBodyBytes    = int64(1 << 20)
 	defaultWorkspaceRoot        = "/data/workspaces"
 	defaultRepoCacheRoot        = "/data/repo-cache"
+	defaultSandboxBackend       = "harness"
 	defaultTemporalNamespace    = "default"
 	defaultTemporalTaskQueue    = "epsilond"
 	defaultPerTaskTokenBudget   = 200_000
@@ -33,6 +34,10 @@ type Config struct {
 	TemporalTaskQueue     string
 	LiteLLMBaseURL        string
 	LiteLLMAPIKey         string
+	WorkerProvider        string
+	WorkerModel           string
+	WorkerEffort          string
+	WorkerSystemPrompt    string
 	Mem0BaseURL           string
 	Mem0APIKey            string
 	GoogleChatAudience    string
@@ -62,6 +67,10 @@ func LoadConfigFromEnv() (Config, error) {
 		TemporalTaskQueue:     envOrDefault("EPSILOND_TEMPORAL_TASK_QUEUE", defaultTemporalTaskQueue),
 		LiteLLMBaseURL:        strings.TrimSpace(os.Getenv("LITELLM_BASE_URL")),
 		LiteLLMAPIKey:         strings.TrimSpace(os.Getenv("LITELLM_API_KEY")),
+		WorkerProvider:        envOrDefault("EPSILOND_WORKER_PROVIDER", "fake"),
+		WorkerModel:           strings.TrimSpace(os.Getenv("EPSILOND_WORKER_MODEL")),
+		WorkerEffort:          strings.TrimSpace(os.Getenv("EPSILOND_WORKER_EFFORT")),
+		WorkerSystemPrompt:    strings.TrimSpace(os.Getenv("EPSILOND_WORKER_SYSTEM_PROMPT")),
 		Mem0BaseURL:           strings.TrimSpace(os.Getenv("EPSILOND_MEM0_BASE_URL")),
 		Mem0APIKey:            strings.TrimSpace(os.Getenv("EPSILOND_MEM0_API_KEY")),
 		GoogleChatAudience:    strings.TrimSpace(os.Getenv("EPSILOND_GOOGLE_CHAT_AUDIENCE")),
@@ -69,7 +78,7 @@ func LoadConfigFromEnv() (Config, error) {
 		GoogleChatAccessToken: strings.TrimSpace(os.Getenv("EPSILOND_GOOGLE_CHAT_ACCESS_TOKEN")),
 		WorkspaceRoot:         envOrDefault("EPSILOND_WORKSPACE_ROOT", defaultWorkspaceRoot),
 		RepoCacheRoot:         envOrDefault("EPSILOND_REPO_CACHE_ROOT", defaultRepoCacheRoot),
-		SandboxBackend:        envOrDefault("EPSILOND_SANDBOX_BACKEND", "srt"),
+		SandboxBackend:        envOrDefault("EPSILOND_SANDBOX_BACKEND", defaultSandboxBackend),
 		SRTBinary:             envOrDefault("EPSILOND_SRT_BINARY", "srt"),
 		AllowedSpaces:         listEnv("EPSILOND_ALLOWED_SPACES"),
 		AllowedRepos:          listEnv("EPSILOND_ALLOWED_REPOS"),

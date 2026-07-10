@@ -32,22 +32,23 @@ const (
 
 // TaskSpec describes one isolated worker execution request.
 type TaskSpec struct {
-	TaskID       string
-	RunID        string
-	ThreadID     string
-	Instruction  string
-	Command      []string
-	Model        string
-	WorkerRole   string
-	ResultPath   string
-	WorkingDir   string
-	Timeout      time.Duration
-	Mounts       []Mount
-	EnvAllowlist []string
-	Env          map[string]string
-	Limits       ResourceLimits
-	NetworkMode  NetworkMode
-	AllowedHosts []string
+	TaskID        string
+	RunID         string
+	ThreadID      string
+	Instruction   string
+	Command       []string
+	Model         string
+	WorkerRole    string
+	ResultPath    string
+	WorkspaceRoot string
+	WorkingDir    string
+	Timeout       time.Duration
+	Mounts        []Mount
+	EnvAllowlist  []string
+	Env           map[string]string
+	Limits        ResourceLimits
+	NetworkMode   NetworkMode
+	AllowedHosts  []string
 }
 
 // Mount maps a host path into the sandbox filesystem.

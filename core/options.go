@@ -244,3 +244,52 @@ func WithDefaultTools(workspaceRoot string) Option {
 			fileTreeTool, gitStatusTool, gitDiffTool, bashTool, patchTool)(h)
 	}
 }
+
+func WithReadOnlyDefaultTools(workspaceRoot string) Option {
+	return func(h *Harness) error {
+		readFileTool, err := tools.NewReadFileTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create read_file tool: %w", err)
+		}
+
+		grepTool, err := tools.NewGrepTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create grep_search tool: %w", err)
+		}
+
+		ripgrepTool, err := tools.NewRipgrepTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create ripgrep tool: %w", err)
+		}
+
+		listDirTool, err := tools.NewListDirTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create list_dir tool: %w", err)
+		}
+
+		fileTreeTool, err := tools.NewFileTreeTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create file_tree tool: %w", err)
+		}
+
+		gitStatusTool, err := tools.NewGitStatusTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create git_status tool: %w", err)
+		}
+
+		gitDiffTool, err := tools.NewGitDiffTool(workspaceRoot)
+		if err != nil {
+			return fmt.Errorf("create git_diff tool: %w", err)
+		}
+
+		return h.toolRegistry.RegisterAll(
+			readFileTool,
+			grepTool,
+			ripgrepTool,
+			listDirTool,
+			fileTreeTool,
+			gitStatusTool,
+			gitDiffTool,
+		)
+	}
+}

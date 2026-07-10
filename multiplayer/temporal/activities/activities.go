@@ -20,6 +20,7 @@ import (
 
 	"github.com/shxntanu/epsilon/multiplayer/chat"
 	"github.com/shxntanu/epsilon/multiplayer/memory"
+	"github.com/shxntanu/epsilon/multiplayer/orchestrator"
 	"github.com/shxntanu/epsilon/multiplayer/sandbox"
 	"github.com/shxntanu/epsilon/multiplayer/store"
 	"github.com/shxntanu/epsilon/multiplayer/workspace"
@@ -106,6 +107,8 @@ type AcquireWorkspaceActivityOutput struct {
 // RunSandboxWorkerActivityInput is the input for RunSandboxWorkerActivity.
 type RunSandboxWorkerActivityInput struct {
 	Spec         sandbox.TaskSpec
+	ThreadID     string
+	Subtask      orchestrator.Subtask
 	WorkerRunID  string
 	WorkerRole   string
 	SandboxImage string
@@ -302,7 +305,7 @@ func (a Activities) RunSandboxWorkerActivity(ctx context.Context, input RunSandb
 			WorkerRole:   firstNonEmpty(input.WorkerRole, spec.WorkerRole),
 			Model:        spec.Model,
 			Status:       store.WorkerRunStatusRunning,
-			SandboxImage: firstNonEmpty(input.SandboxImage, "srt"),
+			SandboxImage: firstNonEmpty(input.SandboxImage, "harness"),
 			StartedAt:    now,
 			CreatedAt:    now,
 			UpdatedAt:    now,
@@ -363,7 +366,7 @@ func (a Activities) RecordUsageActivity(ctx context.Context, input RecordUsageAc
 }
 
 func (a Activities) prepareSandboxSpec(ctx context.Context, input RunSandboxWorkerActivityInput) (sandbox.TaskSpec, string, error) {
-	spec := input.Spec
+	spec := specFromInput(input)
 	if spec.RunID == "" {
 		spec.RunID = strings.TrimSpace(input.WorkerRunID)
 	}
@@ -381,6 +384,7 @@ func (a Activities) prepareSandboxSpec(ctx context.Context, input RunSandboxWork
 		if err != nil {
 			return sandbox.TaskSpec{}, "", err
 		}
+		spec.WorkspaceRoot = firstNonEmpty(spec.WorkspaceRoot, ws.Root)
 		scratch, err := ws.TaskScratch(ctx, spec.TaskID)
 		if err != nil {
 			return sandbox.TaskSpec{}, "", err
@@ -390,6 +394,46 @@ func (a Activities) prepareSandboxSpec(ctx context.Context, input RunSandboxWork
 		spec.Mounts = ensureWritableMount(spec.Mounts, scratch.Path)
 	}
 	return spec, spec.RunID, nil
+}
+
+func specFromInput(input RunSandboxWorkerActivityInput) sandbox.TaskSpec {
+	spec := input.Spec
+	subtask := input.Subtask
+	if subtask.ID != "" {
+		spec.TaskID = firstNonEmpty(spec.TaskID, subtask.ID)
+		spec.Instruction = firstNonEmpty(spec.Instruction, promptForSubtask(subtask))
+		spec.WorkerRole = firstNonEmpty(spec.WorkerRole, subtask.WorkerRole)
+	}
+	spec.ThreadID = firstNonEmpty(spec.ThreadID, input.ThreadID)
+	spec.WorkerRole = firstNonEmpty(spec.WorkerRole, input.WorkerRole)
+	return spec
+}
+
+func promptForSubtask(subtask orchestrator.Subtask) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(subtask.Goal))
+	if len(subtask.Artifacts) > 0 {
+		b.WriteString("\n\nRelevant artifacts:\n")
+		for _, artifact := range subtask.Artifacts {
+			b.WriteString("- ")
+			b.WriteString(firstNonEmpty(artifact.Name, artifact.ID))
+			if artifact.URI != "" {
+				b.WriteString(" (")
+				b.WriteString(artifact.URI)
+				b.WriteString(")")
+			}
+			b.WriteString("\n")
+		}
+	}
+	if len(subtask.Memory) > 0 {
+		b.WriteString("\nRelevant memory:\n")
+		for _, memory := range subtask.Memory {
+			b.WriteString("- ")
+			b.WriteString(firstNonEmpty(memory.Summary, memory.ID))
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func ensureWritableMount(mounts []sandbox.Mount, path string) []sandbox.Mount {

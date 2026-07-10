@@ -40,11 +40,12 @@ func TextPart(text string) ContentPart {
 
 // Message is the provider-neutral conversation unit used by the harness.
 type Message struct {
-	Role       Role          `json:"role"`
-	Content    []ContentPart `json:"content,omitempty"`
-	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"`
-	ToolName   string        `json:"tool_name,omitempty"`
+	Role               Role              `json:"role"`
+	Content            []ContentPart     `json:"content,omitempty"`
+	ToolCalls          []ToolCall        `json:"tool_calls,omitempty"`
+	ToolCallID         string            `json:"tool_call_id,omitempty"`
+	ToolName           string            `json:"tool_name,omitempty"`
+	ToolResultMetadata map[string]string `json:"tool_result_metadata,omitempty"`
 }
 
 // SystemMessage returns a system message with text content.
@@ -74,10 +75,11 @@ func AssistantMessage(text string) Message {
 // ToolMessage returns a tool-result message tied to a previous tool call.
 func ToolMessage(callID string, name string, result ToolResult) Message {
 	return Message{
-		Role:       RoleTool,
-		Content:    result.Content,
-		ToolCallID: callID,
-		ToolName:   name,
+		Role:               RoleTool,
+		Content:            result.Content,
+		ToolCallID:         callID,
+		ToolName:           name,
+		ToolResultMetadata: result.Metadata,
 	}
 }
 
