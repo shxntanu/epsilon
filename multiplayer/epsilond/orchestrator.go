@@ -8,11 +8,15 @@ import (
 	"strings"
 
 	"github.com/shxntanu/epsilon/multiplayer/chat"
+	"github.com/shxntanu/epsilon/multiplayer/orchestrator"
 )
 
 // ChatOrchestrator starts or signals durable work for a chat thread.
 type ChatOrchestrator interface {
 	HandleMention(ctx context.Context, event *chat.Event) (TaskHandle, error)
+	HandleFollowup(ctx context.Context, event *chat.Event) (TaskHandle, error)
+	HandleInterrupt(ctx context.Context, event *chat.Event, kind orchestrator.InterruptKind, reason string) (TaskHandle, error)
+	HandleStatus(ctx context.Context, event *chat.Event) (TaskHandle, error)
 }
 
 // TaskHandle identifies accepted work for a Google Chat thread.
@@ -49,6 +53,45 @@ func (BootstrapOrchestrator) HandleMention(ctx context.Context, event *chat.Even
 		TaskID:     taskID,
 		WorkflowID: workflowID,
 		Message:    "Epsilon accepted the task and will report back in this thread.",
+	}, nil
+}
+
+// HandleFollowup records a follow-up as accepted local work before Temporal is wired.
+func (o BootstrapOrchestrator) HandleFollowup(ctx context.Context, event *chat.Event) (TaskHandle, error) {
+	return o.HandleMention(ctx, event)
+}
+
+// HandleInterrupt accepts an interrupt before Temporal is wired.
+func (BootstrapOrchestrator) HandleInterrupt(ctx context.Context, event *chat.Event, kind orchestrator.InterruptKind, reason string) (TaskHandle, error) {
+	select {
+	case <-ctx.Done():
+		return TaskHandle{}, fmt.Errorf("orchestrator cancelled: %w", ctx.Err())
+	default:
+	}
+	if event == nil {
+		return TaskHandle{}, fmt.Errorf("chat event is nil")
+	}
+	return TaskHandle{
+		TaskID:     messageID(event),
+		WorkflowID: workflowID(event),
+		Message:    "Epsilon updated the thread plan.",
+	}, nil
+}
+
+// HandleStatus returns a status acknowledgement before Temporal is wired.
+func (BootstrapOrchestrator) HandleStatus(ctx context.Context, event *chat.Event) (TaskHandle, error) {
+	select {
+	case <-ctx.Done():
+		return TaskHandle{}, fmt.Errorf("orchestrator cancelled: %w", ctx.Err())
+	default:
+	}
+	if event == nil {
+		return TaskHandle{}, fmt.Errorf("chat event is nil")
+	}
+	return TaskHandle{
+		TaskID:     messageID(event),
+		WorkflowID: workflowID(event),
+		Message:    "Epsilon has no durable status because Temporal is not configured.",
 	}, nil
 }
 

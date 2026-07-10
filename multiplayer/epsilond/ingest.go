@@ -45,6 +45,7 @@ func (i BootstrapIngestor) IngestGoogleChatEvent(ctx context.Context, event RawG
 			Message:  "ignored: message does not mention Epsilon",
 		}, nil
 	}
+	classification := classifyMessage(normalized)
 	inserted := true
 	if i.Store != nil {
 		var err error
@@ -63,11 +64,11 @@ func (i BootstrapIngestor) IngestGoogleChatEvent(ctx context.Context, event RawG
 	if orchestrator == nil {
 		orchestrator = BootstrapOrchestrator{}
 	}
-	handle, err := orchestrator.HandleMention(ctx, normalized)
+	handle, createTask, err := i.handleByClassification(ctx, orchestrator, normalized, classification)
 	if err != nil {
 		return IngestResult{}, err
 	}
-	if i.Store != nil {
+	if i.Store != nil && createTask {
 		if err := i.Store.CreateTask(ctx, store.Task{
 			ID:        handle.TaskID,
 			ThreadID:  threadID(normalized),
@@ -104,6 +105,23 @@ func (i BootstrapIngestor) IngestGoogleChatEvent(ctx context.Context, event RawG
 		ThreadID:   threadID(normalized),
 		WorkflowID: handle.WorkflowID,
 	}, nil
+}
+
+func (i BootstrapIngestor) handleByClassification(ctx context.Context, orchestrator ChatOrchestrator, event *chat.Event, classification messageClassification) (TaskHandle, bool, error) {
+	switch classification.Kind {
+	case messageKindStatus:
+		handle, err := orchestrator.HandleStatus(ctx, event)
+		return handle, false, err
+	case messageKindInterrupt:
+		handle, err := orchestrator.HandleInterrupt(ctx, event, classification.Interrupt, classification.Reason)
+		return handle, false, err
+	case messageKindFollowup:
+		handle, err := orchestrator.HandleFollowup(ctx, event)
+		return handle, false, err
+	default:
+		handle, err := orchestrator.HandleMention(ctx, event)
+		return handle, true, err
+	}
 }
 
 func (i BootstrapIngestor) persistMention(ctx context.Context, event *chat.Event) (bool, error) {
