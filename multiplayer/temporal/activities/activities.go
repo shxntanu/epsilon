@@ -20,6 +20,7 @@ import (
 
 	"github.com/shxntanu/epsilon/multiplayer/chat"
 	"github.com/shxntanu/epsilon/multiplayer/memory"
+	"github.com/shxntanu/epsilon/multiplayer/models"
 	"github.com/shxntanu/epsilon/multiplayer/orchestrator"
 	"github.com/shxntanu/epsilon/multiplayer/sandbox"
 	"github.com/shxntanu/epsilon/multiplayer/store"
@@ -41,6 +42,7 @@ type Activities struct {
 	ChatClient       chat.Client
 	AttachmentClient chat.AttachmentDownloader
 	MemoryService    memory.Service
+	ModelRouter      *models.Router
 	SandboxRunner    sandbox.Runner
 	WorkspaceManager *workspace.Manager
 }
@@ -109,6 +111,8 @@ type RunSandboxWorkerActivityInput struct {
 	Spec         sandbox.TaskSpec
 	ThreadID     string
 	Subtask      orchestrator.Subtask
+	ModelRole    models.Role
+	UsageReason  string
 	WorkerRunID  string
 	WorkerRole   string
 	SandboxImage string
@@ -323,6 +327,9 @@ func (a Activities) RunSandboxWorkerActivity(ctx context.Context, input RunSandb
 		if updateErr := a.Store.UpdateWorkerRunStatus(ctx, runID, status, result.ResultPointer, errMessage); updateErr != nil && err == nil {
 			return RunSandboxWorkerActivityOutput{}, updateErr
 		}
+		if usageErr := a.recordWorkerUsage(context.WithoutCancel(ctx), spec, runID, result); usageErr != nil && err == nil {
+			return RunSandboxWorkerActivityOutput{}, usageErr
+		}
 	}
 	if err != nil {
 		return RunSandboxWorkerActivityOutput{}, err
@@ -367,6 +374,15 @@ func (a Activities) RecordUsageActivity(ctx context.Context, input RecordUsageAc
 
 func (a Activities) prepareSandboxSpec(ctx context.Context, input RunSandboxWorkerActivityInput) (sandbox.TaskSpec, string, error) {
 	spec := specFromInput(input)
+	routeRole, route := a.routeForSpec(input, spec)
+	spec.ModelRole = firstNonEmpty(spec.ModelRole, string(routeRole))
+	spec.ModelProvider = firstNonEmpty(spec.ModelProvider, route.Provider)
+	spec.Model = firstNonEmpty(spec.Model, route.Model)
+	spec.Effort = firstNonEmpty(spec.Effort, string(route.Effort))
+	spec.UsageReason = firstNonEmpty(spec.UsageReason, input.UsageReason, string(routeRole))
+	if spec.Limits.MaxOutputBytes == 0 && route.MaxTokens > 0 {
+		spec.Limits.MaxOutputBytes = route.MaxTokens * 4
+	}
 	if spec.RunID == "" {
 		spec.RunID = strings.TrimSpace(input.WorkerRunID)
 	}
@@ -394,6 +410,69 @@ func (a Activities) prepareSandboxSpec(ctx context.Context, input RunSandboxWork
 		spec.Mounts = ensureWritableMount(spec.Mounts, scratch.Path)
 	}
 	return spec, spec.RunID, nil
+}
+
+func (a Activities) routeForSpec(input RunSandboxWorkerActivityInput, spec sandbox.TaskSpec) (models.Role, models.Route) {
+	role := input.ModelRole
+	if parsed, ok := models.ParseRole(spec.ModelRole); ok {
+		role = parsed
+	}
+	if role == "" {
+		role = models.RoleWorkerDefaultCode
+	}
+	if a.ModelRouter == nil {
+		route := models.DefaultConfig().Routes[role]
+		return role, route
+	}
+	if route, ok := a.ModelRouter.Route(role); ok {
+		return role, route
+	}
+	return role, models.Route{}
+}
+
+func (a Activities) recordWorkerUsage(ctx context.Context, spec sandbox.TaskSpec, runID string, result sandbox.Result) error {
+	if a.Store == nil {
+		return nil
+	}
+	role, _ := models.ParseRole(spec.ModelRole)
+	route := models.Route{
+		Provider: spec.ModelProvider,
+		Model:    spec.Model,
+	}
+	if a.ModelRouter != nil && role != "" {
+		if configured, ok := a.ModelRouter.Route(role); ok {
+			route = configured
+			route.Provider = firstNonEmpty(spec.ModelProvider, route.Provider)
+			route.Model = firstNonEmpty(spec.Model, route.Model)
+		}
+	}
+	inputTokens := result.Usage.InputTokens
+	outputTokens := result.Usage.OutputTokens
+	estimate := models.EstimateCost(route, inputTokens, outputTokens)
+	estimatedCost := fmt.Sprintf("%.6f", estimate.TotalCostUSD)
+	metadata, _ := json.Marshal(map[string]any{
+		"model_role":           spec.ModelRole,
+		"usage_reason":         firstNonEmpty(spec.UsageReason, spec.ModelRole),
+		"model_calls":          result.Usage.ModelCalls,
+		"result_pointer":       result.ResultPointer,
+		"estimated_input_usd":  estimate.InputCostUSD,
+		"estimated_output_usd": estimate.OutputCostUSD,
+		"aggregated":           true,
+	})
+	return a.Store.RecordUsage(ctx, store.UsageLedgerEntry{
+		ID:            stableActivityID("usage", spec.ThreadID, spec.TaskID, runID, spec.ModelRole),
+		ThreadID:      spec.ThreadID,
+		TaskID:        spec.TaskID,
+		WorkerRunID:   runID,
+		Provider:      estimate.Provider,
+		Model:         estimate.Model,
+		Reason:        firstNonEmpty(spec.UsageReason, spec.ModelRole),
+		InputTokens:   inputTokens,
+		OutputTokens:  outputTokens,
+		EstimatedCost: estimatedCost,
+		Metadata:      json.RawMessage(metadata),
+		CreatedAt:     time.Now().UTC(),
+	})
 }
 
 func specFromInput(input RunSandboxWorkerActivityInput) sandbox.TaskSpec {

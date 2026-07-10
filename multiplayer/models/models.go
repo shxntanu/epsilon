@@ -1,5 +1,7 @@
 package models
 
+import "strings"
+
 // Role identifies the model role requested by the epsilond orchestrator.
 type Role string
 
@@ -72,63 +74,59 @@ func DefaultConfig() Config {
 	return Config{
 		Routes: map[Role]Route{
 			RoleOrchestratorFrontier: {
-				Provider:                               "frontier",
-				Model:                                  "frontier-orchestrator-placeholder",
-				Effort:                                 EffortHigh,
-				MaxTokens:                              32_000,
-				EstimatedInputCostPerMillionTokensUSD:  3.00,
-				EstimatedOutputCostPerMillionTokensUSD: 15.00,
+				Effort:    EffortHigh,
+				MaxTokens: 32_000,
 			},
 			RoleWorkerDefaultCode: {
-				Provider:                               "anthropic",
-				Model:                                  "claude-haiku-code-worker-placeholder",
-				Effort:                                 EffortMedium,
-				MaxTokens:                              16_000,
-				EstimatedInputCostPerMillionTokensUSD:  0.80,
-				EstimatedOutputCostPerMillionTokensUSD: 4.00,
+				Effort:    EffortMedium,
+				MaxTokens: 16_000,
 			},
 			RoleWorkerDefaultArtifact: {
-				Provider:                               "google",
-				Model:                                  "gemini-flash-artifact-worker-placeholder",
-				Effort:                                 EffortMedium,
-				MaxTokens:                              16_000,
-				EstimatedInputCostPerMillionTokensUSD:  0.40,
-				EstimatedOutputCostPerMillionTokensUSD: 1.50,
+				Effort:    EffortMedium,
+				MaxTokens: 16_000,
 			},
 			RoleWorkerEscalation: {
-				Provider:                               "frontier",
-				Model:                                  "frontier-worker-escalation-placeholder",
-				Effort:                                 EffortHigh,
-				MaxTokens:                              32_000,
-				EstimatedInputCostPerMillionTokensUSD:  3.00,
-				EstimatedOutputCostPerMillionTokensUSD: 15.00,
+				Effort:    EffortHigh,
+				MaxTokens: 32_000,
 			},
 			RoleCheapClassifier: {
-				Provider:                               "google",
-				Model:                                  "gemini-flash-classifier-placeholder",
-				Effort:                                 EffortLow,
-				MaxTokens:                              2_000,
-				EstimatedInputCostPerMillionTokensUSD:  0.10,
-				EstimatedOutputCostPerMillionTokensUSD: 0.40,
+				Effort:    EffortLow,
+				MaxTokens: 2_000,
 			},
 			RoleSummarizer: {
-				Provider:                               "google",
-				Model:                                  "gemini-flash-summarizer-placeholder",
-				Effort:                                 EffortLow,
-				MaxTokens:                              8_000,
-				EstimatedInputCostPerMillionTokensUSD:  0.20,
-				EstimatedOutputCostPerMillionTokensUSD: 0.80,
+				Effort:    EffortLow,
+				MaxTokens: 8_000,
 			},
 			RoleMemoryDistiller: {
-				Provider:                               "anthropic",
-				Model:                                  "claude-haiku-memory-distiller-placeholder",
-				Effort:                                 EffortLow,
-				MaxTokens:                              8_000,
-				EstimatedInputCostPerMillionTokensUSD:  0.80,
-				EstimatedOutputCostPerMillionTokensUSD: 4.00,
+				Effort:    EffortLow,
+				MaxTokens: 8_000,
 			},
 		},
 	}
+}
+
+// Roles returns the stable list of supported model routing roles.
+func Roles() []Role {
+	return []Role{
+		RoleOrchestratorFrontier,
+		RoleWorkerDefaultCode,
+		RoleWorkerDefaultArtifact,
+		RoleWorkerEscalation,
+		RoleCheapClassifier,
+		RoleSummarizer,
+		RoleMemoryDistiller,
+	}
+}
+
+// ParseRole accepts a role name when it matches a known role.
+func ParseRole(value string) (Role, bool) {
+	role := Role(strings.TrimSpace(value))
+	for _, known := range Roles() {
+		if role == known {
+			return role, true
+		}
+	}
+	return "", false
 }
 
 // NewRouter creates a router backed by cfg.
@@ -140,6 +138,12 @@ func NewRouter(cfg Config) Router {
 func (r Router) Route(role Role) (Route, bool) {
 	route, ok := r.config.Routes[role]
 	return route, ok
+}
+
+// MustRoute returns role's route or the zero route when it is not configured.
+func (r Router) MustRoute(role Role) Route {
+	route, _ := r.Route(role)
+	return route
 }
 
 // EstimateCost estimates invocation cost from the route's configured rates.

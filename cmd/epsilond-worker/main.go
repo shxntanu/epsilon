@@ -14,6 +14,7 @@ import (
 	"github.com/shxntanu/epsilon/multiplayer/chat/googlechat"
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
 	"github.com/shxntanu/epsilon/multiplayer/harnessworker"
+	"github.com/shxntanu/epsilon/multiplayer/models"
 	"github.com/shxntanu/epsilon/multiplayer/sandbox"
 	"github.com/shxntanu/epsilon/multiplayer/store"
 	"github.com/shxntanu/epsilon/multiplayer/temporal/activities"
@@ -69,6 +70,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	modelRouter := models.NewRouter(cfg.ModelRoutes)
 	temporalClient, err := client.Dial(client.Options{
 		HostPort:  cfg.TemporalAddress,
 		Namespace: cfg.TemporalNamespace,
@@ -82,6 +84,7 @@ func run() error {
 	w.RegisterWorkflowWithOptions(workflows.ThreadWorkflow, workflowRegisterOptions(workflows.ThreadWorkflowName))
 	activitySet := &activities.Activities{
 		Store:            pgStore,
+		ModelRouter:      &modelRouter,
 		SandboxRunner:    sandboxRunner,
 		WorkspaceManager: workspaceManager,
 	}
@@ -113,9 +116,10 @@ func buildSandboxRunner(cfg epsilond.Config) (sandbox.Runner, error) {
 			SettingsDir: filepath.Join(cfg.WorkspaceRoot, ".srt-settings"),
 		}, nil
 	case "", "harness":
+		defaultRoute := cfg.ModelRoutes.Routes[models.RoleWorkerDefaultCode]
 		provider, err := coreproviders.New(coreproviders.Config{
 			Name:           cfg.WorkerProvider,
-			Model:          cfg.WorkerModel,
+			Model:          firstNonEmpty(defaultRoute.Model, cfg.WorkerModel),
 			LiteLLMBaseURL: cfg.LiteLLMBaseURL,
 			LiteLLMAPIKey:  cfg.LiteLLMAPIKey,
 		})
@@ -126,8 +130,8 @@ func buildSandboxRunner(cfg epsilond.Config) (sandbox.Runner, error) {
 			WorkspaceRoot: cfg.WorkspaceRoot,
 			SessionDir:    filepath.Join(cfg.WorkspaceRoot, ".harness-sessions"),
 			Provider:      provider,
-			Model:         cfg.WorkerModel,
-			Effort:        cfg.WorkerEffort,
+			Model:         firstNonEmpty(defaultRoute.Model, cfg.WorkerModel),
+			Effort:        firstNonEmpty(string(defaultRoute.Effort), cfg.WorkerEffort),
 			SystemPrompt:  cfg.WorkerSystemPrompt,
 		})
 	case "noop":
@@ -135,6 +139,15 @@ func buildSandboxRunner(cfg epsilond.Config) (sandbox.Runner, error) {
 	default:
 		return nil, fmt.Errorf("unsupported sandbox backend %q", cfg.SandboxBackend)
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func workflowRegisterOptions(name string) workflow.RegisterOptions {

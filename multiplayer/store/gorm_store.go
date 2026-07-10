@@ -370,7 +370,10 @@ func (s *GORMStore) RecordUsage(ctx context.Context, entry UsageLedgerEntry) err
 	if model.CreatedAt.IsZero() {
 		model.CreatedAt = time.Now().UTC()
 	}
-	if err := s.db.WithContext(ctx).Create(&model).Error; err != nil {
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoNothing: true,
+	}).Create(&model).Error; err != nil {
 		return fmt.Errorf("record usage: %w", err)
 	}
 	return nil

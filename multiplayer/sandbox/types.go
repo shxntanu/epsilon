@@ -38,6 +38,10 @@ type TaskSpec struct {
 	Instruction   string
 	Command       []string
 	Model         string
+	ModelProvider string
+	ModelRole     string
+	Effort        string
+	UsageReason   string
 	WorkerRole    string
 	ResultPath    string
 	WorkspaceRoot string
@@ -70,6 +74,7 @@ type ResourceLimits struct {
 type Usage struct {
 	InputTokens   int64
 	OutputTokens  int64
+	ModelCalls    int64
 	EstimatedCost string
 }
 

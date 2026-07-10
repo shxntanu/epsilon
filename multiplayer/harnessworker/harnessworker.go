@@ -55,7 +55,7 @@ func (r *Runner) Run(ctx context.Context, spec sandbox.TaskSpec) (sandbox.Result
 		return sandbox.Result{}, err
 	}
 	workspaceRoot := r.workspaceRootForSpec(spec)
-	h, err := r.newHarness(workspaceRoot)
+	h, err := r.newHarness(workspaceRoot, spec)
 	if err != nil {
 		return sandbox.Result{}, err
 	}
@@ -76,6 +76,7 @@ func (r *Runner) Run(ctx context.Context, spec sandbox.TaskSpec) (sandbox.Result
 	}
 
 	result := resultFromMessages(sess.Messages())
+	result.Usage = usageFromEvents(sess.History())
 	result.ResultPointer = spec.ResultPath
 	if err := writeResultFile(spec.ResultPath, result); err != nil {
 		return sandbox.Result{}, err
@@ -105,7 +106,7 @@ func (r *Runner) workspaceRootForSpec(spec sandbox.TaskSpec) string {
 	return r.cfg.WorkspaceRoot
 }
 
-func (r *Runner) newHarness(workspaceRoot string) (*core.Harness, error) {
+func (r *Runner) newHarness(workspaceRoot string, spec sandbox.TaskSpec) (*core.Harness, error) {
 	systemPrompt := strings.TrimSpace(r.cfg.SystemPrompt)
 	if systemPrompt == "" {
 		systemPrompt = defaultWorkerSystemPrompt
@@ -116,8 +117,8 @@ func (r *Runner) newHarness(workspaceRoot string) (*core.Harness, error) {
 		core.WithPermissionBroker(permissions.NewDenyBroker()),
 		core.WithReadOnlyDefaultTools(workspaceRoot),
 		core.WithRuntimeSettings(harnessconfig.Settings{
-			Model:        r.cfg.Model,
-			Effort:       r.cfg.Effort,
+			Model:        firstNonEmpty(spec.Model, r.cfg.Model),
+			Effort:       firstNonEmpty(spec.Effort, r.cfg.Effort),
 			SystemPrompt: systemPrompt,
 		}),
 	}
@@ -298,11 +299,33 @@ func writeResultFile(path string, result sandbox.Result) error {
 	return nil
 }
 
+func usageFromEvents(events []types.Event) sandbox.Usage {
+	var usage sandbox.Usage
+	for _, event := range events {
+		if event.Kind != types.EventModelMessageCompleted || event.Usage == nil {
+			continue
+		}
+		usage.InputTokens += int64(event.Usage.InputTokens)
+		usage.OutputTokens += int64(event.Usage.OutputTokens)
+		usage.ModelCalls++
+	}
+	return usage
+}
+
 func statusFromContext(ctx context.Context) sandbox.Status {
 	if ctx.Err() != nil {
 		return sandbox.StatusCancelled
 	}
 	return sandbox.StatusFailed
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // StatusFromContext maps context cancellation into a sandbox status.

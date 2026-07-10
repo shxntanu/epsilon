@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/shxntanu/epsilon/multiplayer/models"
 )
 
 const (
@@ -38,6 +40,7 @@ type Config struct {
 	WorkerModel           string
 	WorkerEffort          string
 	WorkerSystemPrompt    string
+	ModelRoutes           models.Config
 	Mem0BaseURL           string
 	Mem0APIKey            string
 	GoogleChatAudience    string
@@ -71,6 +74,7 @@ func LoadConfigFromEnv() (Config, error) {
 		WorkerModel:           strings.TrimSpace(os.Getenv("EPSILOND_WORKER_MODEL")),
 		WorkerEffort:          strings.TrimSpace(os.Getenv("EPSILOND_WORKER_EFFORT")),
 		WorkerSystemPrompt:    strings.TrimSpace(os.Getenv("EPSILOND_WORKER_SYSTEM_PROMPT")),
+		ModelRoutes:           loadModelRoutesFromEnv(),
 		Mem0BaseURL:           strings.TrimSpace(os.Getenv("EPSILOND_MEM0_BASE_URL")),
 		Mem0APIKey:            strings.TrimSpace(os.Getenv("EPSILOND_MEM0_API_KEY")),
 		GoogleChatAudience:    strings.TrimSpace(os.Getenv("EPSILOND_GOOGLE_CHAT_AUDIENCE")),
@@ -93,6 +97,35 @@ func LoadConfigFromEnv() (Config, error) {
 		return Config{}, fmt.Errorf("EPSILOND_SHUTDOWN_TIMEOUT must be positive")
 	}
 	return cfg, nil
+}
+
+func loadModelRoutesFromEnv() models.Config {
+	cfg := models.DefaultConfig()
+	for _, role := range models.Roles() {
+		route := cfg.Routes[role]
+		prefix := modelRoleEnvPrefix(role)
+		route.Provider = envOrDefault(prefix+"_PROVIDER", route.Provider)
+		route.Model = envOrDefault(prefix+"_MODEL", route.Model)
+		route.Effort = models.Effort(envOrDefault(prefix+"_EFFORT", string(route.Effort)))
+		route.MaxTokens = int64EnvOrDefault(prefix+"_MAX_TOKENS", route.MaxTokens)
+		route.EstimatedInputCostPerMillionTokensUSD = floatEnvOrDefault(prefix+"_INPUT_COST_PER_1M", route.EstimatedInputCostPerMillionTokensUSD)
+		route.EstimatedOutputCostPerMillionTokensUSD = floatEnvOrDefault(prefix+"_OUTPUT_COST_PER_1M", route.EstimatedOutputCostPerMillionTokensUSD)
+		cfg.Routes[role] = route
+	}
+	cfg.Routes[models.RoleOrchestratorFrontier] = routeWithLegacyModel(cfg.Routes[models.RoleOrchestratorFrontier], "EPSILOND_FRONTIER_MODEL")
+	cfg.Routes[models.RoleWorkerDefaultCode] = routeWithLegacyModel(cfg.Routes[models.RoleWorkerDefaultCode], "EPSILOND_WORKER_MODEL")
+	return cfg
+}
+
+func routeWithLegacyModel(route models.Route, envName string) models.Route {
+	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		route.Model = value
+	}
+	return route
+}
+
+func modelRoleEnvPrefix(role models.Role) string {
+	return "EPSILOND_MODEL_" + strings.ToUpper(strings.ReplaceAll(string(role), "-", "_"))
 }
 
 func envOrDefault(name string, fallback string) string {
@@ -138,6 +171,18 @@ func int64EnvOrDefault(name string, fallback int64) int64 {
 	}
 	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func floatEnvOrDefault(name string, fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value < 0 {
 		return fallback
 	}
 	return value
