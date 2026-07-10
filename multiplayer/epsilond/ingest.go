@@ -193,9 +193,5 @@ func messageID(event *chat.Event) string {
 }
 
 func workflowID(event *chat.Event) string {
-	threadName := event.ThreadName
-	if threadName == "" {
-		threadName = event.MessageName
-	}
-	return "thread/" + stableID(event.SpaceName) + "/" + stableID(threadName)
+	return "thread/" + spaceID(event) + "/" + threadID(event)
 }

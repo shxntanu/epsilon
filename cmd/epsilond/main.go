@@ -65,6 +65,7 @@ func run() error {
 		}
 	}
 	chatOrchestrator := epsilond.ChatOrchestrator(epsilond.BootstrapOrchestrator{})
+	var orchestratorClient *temporalorchestrator.Client
 	var temporalClient client.Client
 	if cfg.TemporalAddress != "" {
 		temporalClient, err = client.Dial(client.Options{
@@ -75,11 +76,14 @@ func run() error {
 			return fmt.Errorf("dial temporal: %w", err)
 		}
 		defer temporalClient.Close()
-		orchestratorClient, err := temporalorchestrator.NewClient(temporalClient, cfg.TemporalTaskQueue)
+		orchestratorClient, err = temporalorchestrator.NewClient(temporalClient, cfg.TemporalTaskQueue)
 		if err != nil {
 			return err
 		}
 		chatOrchestrator = epsilond.TemporalOrchestrator{Client: orchestratorClient}
+	}
+	if orchestratorClient != nil {
+		options = append(options, epsilond.WithOrchestratorClient(orchestratorClient))
 	}
 	options = append(options, epsilond.WithIngestor(epsilond.BootstrapIngestor{
 		Orchestrator: chatOrchestrator,

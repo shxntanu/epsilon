@@ -72,6 +72,14 @@ func (c *Client) Interrupt(ctx context.Context, signal orchestrator.InterruptSig
 	return c.Status(ctx, orchestrator.StatusQuery{Thread: signal.Thread})
 }
 
+// UpdateTask sends a task-state patch and returns current status.
+func (c *Client) UpdateTask(ctx context.Context, request orchestrator.UpdateTaskRequest) (orchestrator.Status, error) {
+	if err := c.client.SignalWorkflow(ctx, WorkflowID(request.Thread), "", workflows.SignalUpdateTask, request); err != nil {
+		return orchestrator.Status{}, fmt.Errorf("signal task update: %w", err)
+	}
+	return c.Status(ctx, orchestrator.StatusQuery{Thread: request.Thread})
+}
+
 // Status queries current workflow state.
 func (c *Client) Status(ctx context.Context, query orchestrator.StatusQuery) (orchestrator.Status, error) {
 	value, err := c.client.QueryWorkflow(ctx, WorkflowID(query.Thread), "", workflows.QueryStatus)

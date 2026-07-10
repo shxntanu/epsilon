@@ -188,6 +188,7 @@ type Client interface {
 	StartOrSignal(ctx context.Context, signal NewChatMessageSignal) (Status, error)
 	SignalMessage(ctx context.Context, signal NewChatMessageSignal) error
 	Interrupt(ctx context.Context, signal InterruptSignal) (Status, error)
+	UpdateTask(ctx context.Context, request UpdateTaskRequest) (Status, error)
 	Status(ctx context.Context, query StatusQuery) (Status, error)
 }
 

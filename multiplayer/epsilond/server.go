@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shxntanu/epsilon/multiplayer/chat"
+	"github.com/shxntanu/epsilon/multiplayer/orchestrator"
 )
 
 // Ingestor accepts raw Google Chat events after HTTP-level validation.
@@ -38,11 +39,12 @@ type DependencyChecker interface {
 
 // Server exposes epsilond's HTTP API.
 type Server struct {
-	cfg      Config
-	logger   *slog.Logger
-	ingestor Ingestor
-	checker  DependencyChecker
-	verifier chat.RequestVerifier
+	cfg          Config
+	logger       *slog.Logger
+	ingestor     Ingestor
+	checker      DependencyChecker
+	verifier     chat.RequestVerifier
+	orchestrator orchestrator.Client
 }
 
 // ServerOption customizes a Server.
@@ -78,6 +80,13 @@ func WithRequestVerifier(verifier chat.RequestVerifier) ServerOption {
 	}
 }
 
+// WithOrchestratorClient configures read/query access to durable orchestration.
+func WithOrchestratorClient(client orchestrator.Client) ServerOption {
+	return func(s *Server) {
+		s.orchestrator = client
+	}
+}
+
 // NewServer returns an epsilond HTTP server.
 func NewServer(cfg Config, opts ...ServerOption) *Server {
 	s := &Server{
@@ -96,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /google-chat/events", s.handleGoogleChatEvent)
+	mux.HandleFunc("GET /threads/status", s.handleThreadStatus)
 	return mux
 }
 
@@ -160,6 +170,31 @@ func (s *Server) handleGoogleChatEvent(w http.ResponseWriter, r *http.Request) {
 		result.Message = "Epsilon accepted the request."
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleThreadStatus(w http.ResponseWriter, r *http.Request) {
+	if s.orchestrator == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "orchestrator is not configured"})
+		return
+	}
+	query := r.URL.Query()
+	spaceID := query.Get("space_id")
+	threadID := query.Get("thread_id")
+	if spaceID == "" || threadID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "space_id and thread_id are required"})
+		return
+	}
+	status, err := s.orchestrator.Status(r.Context(), orchestrator.StatusQuery{
+		Thread: orchestrator.ThreadKey{
+			SpaceID:  spaceID,
+			ThreadID: threadID,
+		},
+	})
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

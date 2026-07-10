@@ -16,6 +16,8 @@ const (
 	SignalNewChatMessage = "new_chat_message"
 	// SignalInterrupt is sent when a user steers or cancels current work.
 	SignalInterrupt = "interrupt"
+	// SignalUpdateTask is sent by operators or activities to patch task state.
+	SignalUpdateTask = "update_task"
 	// QueryStatus returns workflow state for a thread.
 	QueryStatus = "status"
 )
@@ -23,11 +25,15 @@ const (
 // ThreadWorkflowInput starts a durable workflow for one chat thread.
 type ThreadWorkflowInput struct {
 	InitialMessage orchestrator.NewChatMessageSignal
+	CarryStatus    orchestrator.Status
 }
 
 // ThreadWorkflow owns short-lived orchestration state for one chat thread.
 func ThreadWorkflow(ctx workflow.Context, input ThreadWorkflowInput) (orchestrator.Status, error) {
-	state := newStatus(input.InitialMessage)
+	state := input.CarryStatus
+	if state.Thread.ThreadID == "" {
+		state = newStatus(input.InitialMessage)
+	}
 	activityOptions := workflow.ActivityOptions{
 		StartToCloseTimeout: 5 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -46,6 +52,7 @@ func ThreadWorkflow(ctx workflow.Context, input ThreadWorkflowInput) (orchestrat
 
 	messageCh := workflow.GetSignalChannel(ctx, SignalNewChatMessage)
 	interruptCh := workflow.GetSignalChannel(ctx, SignalInterrupt)
+	updateTaskCh := workflow.GetSignalChannel(ctx, SignalUpdateTask)
 
 	for {
 		selector := workflow.NewSelector(ctx)
@@ -59,16 +66,16 @@ func ThreadWorkflow(ctx workflow.Context, input ThreadWorkflowInput) (orchestrat
 			c.Receive(ctx, &signal)
 			state = acceptInterrupt(state, signal, workflow.Now(ctx))
 		})
+		selector.AddReceive(updateTaskCh, func(c workflow.ReceiveChannel, more bool) {
+			var request orchestrator.UpdateTaskRequest
+			c.Receive(ctx, &request)
+			state = acceptTaskUpdate(state, request, workflow.Now(ctx))
+		})
 		selector.Select(ctx)
 
 		if workflow.GetInfo(ctx).GetCurrentHistoryLength() > 2_000 {
 			return state, workflow.NewContinueAsNewError(ctx, ThreadWorkflow, ThreadWorkflowInput{
-				InitialMessage: orchestrator.NewChatMessageSignal{
-					Thread:     state.Thread,
-					MessageID:  state.ActiveTaskID,
-					Text:       state.LastMessage,
-					ReceivedAt: state.UpdatedAt,
-				},
+				CarryStatus: state,
 			})
 		}
 	}
@@ -104,6 +111,15 @@ func acceptMessage(status orchestrator.Status, signal orchestrator.NewChatMessag
 	status.Plan.Thread = signal.Thread
 	status.Plan.Goal = signal.Text
 	status.Plan.State = orchestrator.TaskStateQueued
+	status.Plan.Subtasks = []orchestrator.Subtask{
+		{
+			ID:        signal.MessageID,
+			Goal:      signal.Text,
+			State:     orchestrator.TaskStateQueued,
+			Artifacts: signal.Artifacts,
+			CreatedAt: status.UpdatedAt,
+		},
+	}
 	if status.Plan.CreatedAt.IsZero() {
 		status.Plan.CreatedAt = status.UpdatedAt
 	}
@@ -127,6 +143,39 @@ func acceptInterrupt(status orchestrator.Status, signal orchestrator.InterruptSi
 		status.State = orchestrator.TaskStatePlanning
 	}
 	status.Plan.State = status.State
+	status.Plan.UpdatedAt = status.UpdatedAt
+	return status
+}
+
+func acceptTaskUpdate(status orchestrator.Status, request orchestrator.UpdateTaskRequest, now time.Time) orchestrator.Status {
+	status.Thread = request.Thread
+	status.UpdatedAt = firstTime(request.UpdatedAt, now)
+	if request.State != "" {
+		status.State = request.State
+		status.Plan.State = request.State
+	}
+	if request.TaskID != "" {
+		status.ActiveTaskID = request.TaskID
+	}
+	status.BlockedReason = request.BlockedReason
+	status.Error = request.Error
+	for i := range status.Plan.Subtasks {
+		if status.Plan.Subtasks[i].ID == request.TaskID {
+			status.Plan.Subtasks[i].State = request.State
+			status.Plan.Subtasks[i].Result = request.Result
+			status.Plan.Subtasks[i].CompletedAt = status.UpdatedAt
+			status.Plan.UpdatedAt = status.UpdatedAt
+			return status
+		}
+	}
+	if request.TaskID != "" {
+		status.Plan.Subtasks = append(status.Plan.Subtasks, orchestrator.Subtask{
+			ID:          request.TaskID,
+			State:       request.State,
+			Result:      request.Result,
+			CompletedAt: status.UpdatedAt,
+		})
+	}
 	status.Plan.UpdatedAt = status.UpdatedAt
 	return status
 }
