@@ -83,6 +83,21 @@ func (c *Client) DownloadMedia(ctx context.Context, resourceName string) ([]byte
 	return c.get(ctx, c.baseURL()+"/media/"+escapeResourceName(resourceName)+"?alt=media")
 }
 
+// DownloadAttachment downloads a normalized Google Chat attachment body.
+func (c *Client) DownloadAttachment(ctx context.Context, attachment chat.Attachment) ([]byte, error) {
+	if err := c.configured(); err != nil {
+		return nil, err
+	}
+	if resourceName := strings.TrimSpace(attachment.Metadata["attachment_data_resource_name"]); resourceName != "" {
+		return c.DownloadMedia(ctx, resourceName)
+	}
+	downloadURI := strings.TrimSpace(attachment.DownloadURI)
+	if downloadURI == "" {
+		return nil, fmt.Errorf("googlechat: attachment %q has no downloadable media reference", attachment.Name)
+	}
+	return c.get(ctx, downloadURI)
+}
+
 // Reply posts text into an existing Google Chat thread.
 func (c *Client) Reply(ctx context.Context, reply chat.Reply) error {
 	if err := c.configured(); err != nil {

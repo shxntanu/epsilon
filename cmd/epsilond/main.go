@@ -16,6 +16,7 @@ import (
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
 	"github.com/shxntanu/epsilon/multiplayer/store"
 	temporalorchestrator "github.com/shxntanu/epsilon/multiplayer/temporal"
+	"github.com/shxntanu/epsilon/multiplayer/workspace"
 	"go.temporal.io/sdk/client"
 )
 
@@ -59,11 +60,20 @@ func run() error {
 			Audience: cfg.GoogleChatAudience,
 		}))
 	}
+	workspaceManager, err := workspace.NewManager(workspace.Config{
+		WorkspaceRoot: cfg.WorkspaceRoot,
+		RepoCacheRoot: cfg.RepoCacheRoot,
+	})
+	if err != nil {
+		return err
+	}
 	var replyClient chat.Client
+	var googleClient *googlechat.Client
 	if cfg.GoogleChatAccessToken != "" {
-		replyClient = &googlechat.Client{
+		googleClient = &googlechat.Client{
 			TokenProvider: googlechat.StaticTokenProvider{Token: cfg.GoogleChatAccessToken},
 		}
+		replyClient = googleClient
 	}
 	chatOrchestrator := epsilond.ChatOrchestrator(epsilond.BootstrapOrchestrator{})
 	var orchestratorClient *temporalorchestrator.Client
@@ -90,6 +100,7 @@ func run() error {
 		Orchestrator: chatOrchestrator,
 		ReplyClient:  replyClient,
 		Store:        pgStore,
+		Workspace:    workspaceManager,
 	}))
 	service := epsilond.NewServer(cfg, options...)
 	httpServer := &http.Server{

@@ -9,6 +9,7 @@ import (
 	"github.com/shxntanu/epsilon/multiplayer/chat"
 	"github.com/shxntanu/epsilon/multiplayer/chat/googlechat"
 	"github.com/shxntanu/epsilon/multiplayer/store"
+	"github.com/shxntanu/epsilon/multiplayer/workspace"
 )
 
 // BootstrapIngestor normalizes chat events and delegates mentions to an orchestrator.
@@ -17,6 +18,7 @@ type BootstrapIngestor struct {
 	Parser       chat.Parser
 	ReplyClient  chat.Client
 	Store        store.Store
+	Workspace    *workspace.Manager
 }
 
 // IngestGoogleChatEvent accepts a raw Google Chat event body.
@@ -58,6 +60,10 @@ func (i BootstrapIngestor) IngestGoogleChatEvent(ctx context.Context, event RawG
 				Accepted: false,
 				Message:  "ignored: duplicate chat message delivery",
 			}, nil
+		}
+	} else if i.Workspace != nil {
+		if _, err := i.Workspace.Acquire(ctx, threadID(normalized)); err != nil {
+			return IngestResult{}, err
 		}
 	}
 	orchestrator := i.Orchestrator
@@ -154,6 +160,11 @@ func (i BootstrapIngestor) persistMention(ctx context.Context, event *chat.Event
 	}
 	if err := i.Store.UpsertThread(ctx, thread); err != nil {
 		return false, err
+	}
+	if i.Workspace != nil {
+		if _, err := i.Workspace.Acquire(ctx, thread.ID); err != nil {
+			return false, err
+		}
 	}
 	message := store.ChatMessage{
 		ID:                messageID(event),

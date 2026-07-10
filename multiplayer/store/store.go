@@ -29,6 +29,7 @@ type TaskStore interface {
 // ArtifactStore persists attachment and generated artifact metadata.
 type ArtifactStore interface {
 	InsertChatArtifact(ctx context.Context, artifact ChatArtifact) error
+	UpdateChatArtifact(ctx context.Context, artifact ChatArtifact) error
 }
 
 // WorkerRunStore persists sandbox worker execution records.

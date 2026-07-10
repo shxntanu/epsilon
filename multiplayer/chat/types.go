@@ -75,6 +75,11 @@ type Client interface {
 	Reply(ctx context.Context, reply Reply) error
 }
 
+// AttachmentDownloader downloads platform-specific attachment bodies.
+type AttachmentDownloader interface {
+	DownloadAttachment(ctx context.Context, attachment Attachment) ([]byte, error)
+}
+
 // RequestVerifier verifies platform-specific HTTP requests before ingestion.
 type RequestVerifier interface {
 	Verify(ctx context.Context, r *http.Request) error

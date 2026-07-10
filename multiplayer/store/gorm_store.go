@@ -218,6 +218,37 @@ func (s *GORMStore) InsertChatArtifact(ctx context.Context, artifact ChatArtifac
 	return nil
 }
 
+// UpdateChatArtifact updates attachment storage and extraction pointers.
+func (s *GORMStore) UpdateChatArtifact(ctx context.Context, artifact ChatArtifact) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
+	artifact.ID = strings.TrimSpace(artifact.ID)
+	if artifact.ID == "" {
+		return fmt.Errorf("artifact ID is empty")
+	}
+	updates := map[string]any{
+		"content_hash":      artifact.ContentHash,
+		"storage_path":      artifact.StoragePath,
+		"extraction_status": string(artifact.ExtractionStatus),
+		"metadata":          jsonOrDefault(artifact.Metadata, `{}`),
+		"updated_at":        time.Now().UTC(),
+	}
+	if artifact.ExtractionStatus == "" {
+		delete(updates, "extraction_status")
+	}
+	result := s.db.WithContext(ctx).Model(&chatArtifactModel{}).
+		Where("id = ?", artifact.ID).
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("update chat artifact: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("update chat artifact: artifact %q not found", artifact.ID)
+	}
+	return nil
+}
+
 // CreateTask stores a task row.
 func (s *GORMStore) CreateTask(ctx context.Context, task Task) error {
 	if err := s.requireDB(); err != nil {

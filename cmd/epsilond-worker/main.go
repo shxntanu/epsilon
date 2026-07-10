@@ -7,10 +7,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/shxntanu/epsilon/multiplayer/chat/googlechat"
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
+	"github.com/shxntanu/epsilon/multiplayer/store"
 	"github.com/shxntanu/epsilon/multiplayer/temporal/activities"
 	"github.com/shxntanu/epsilon/multiplayer/temporal/workflows"
+	"github.com/shxntanu/epsilon/multiplayer/workspace"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
@@ -28,6 +32,35 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	var pgStore store.Store
+	if cfg.PostgresDSN != "" {
+		gormStore, err := store.OpenGORM(cfg.PostgresDSN)
+		if err != nil {
+			return err
+		}
+		if cfg.AutoMigrate {
+			migrateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := gormStore.AutoMigrate(migrateCtx); err != nil {
+				cancel()
+				return err
+			}
+			cancel()
+		}
+		pgStore = gormStore
+	}
+	workspaceManager, err := workspace.NewManager(workspace.Config{
+		WorkspaceRoot: cfg.WorkspaceRoot,
+		RepoCacheRoot: cfg.RepoCacheRoot,
+	})
+	if err != nil {
+		return err
+	}
+	var googleClient *googlechat.Client
+	if cfg.GoogleChatAccessToken != "" {
+		googleClient = &googlechat.Client{
+			TokenProvider: googlechat.StaticTokenProvider{Token: cfg.GoogleChatAccessToken},
+		}
+	}
 	temporalClient, err := client.Dial(client.Options{
 		HostPort:  cfg.TemporalAddress,
 		Namespace: cfg.TemporalNamespace,
@@ -39,7 +72,15 @@ func run() error {
 
 	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
 	w.RegisterWorkflowWithOptions(workflows.ThreadWorkflow, workflowRegisterOptions(workflows.ThreadWorkflowName))
-	w.RegisterActivity(&activities.Activities{})
+	activitySet := &activities.Activities{
+		Store:            pgStore,
+		WorkspaceManager: workspaceManager,
+	}
+	if googleClient != nil {
+		activitySet.ChatClient = googleClient
+		activitySet.AttachmentClient = googleClient
+	}
+	w.RegisterActivity(activitySet)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -4,7 +4,18 @@ package activities
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"mime"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/shxntanu/epsilon/multiplayer/chat"
 	"github.com/shxntanu/epsilon/multiplayer/memory"
@@ -16,6 +27,7 @@ import (
 var (
 	errMissingStore            = errors.New("activities: store dependency is nil")
 	errMissingChatClient       = errors.New("activities: chat client dependency is nil")
+	errMissingAttachmentClient = errors.New("activities: attachment client dependency is nil")
 	errMissingMemoryService    = errors.New("activities: memory service dependency is nil")
 	errMissingSandboxRunner    = errors.New("activities: sandbox runner dependency is nil")
 	errMissingWorkspaceManager = errors.New("activities: workspace manager dependency is nil")
@@ -25,6 +37,7 @@ var (
 type Activities struct {
 	Store            store.Store
 	ChatClient       chat.Client
+	AttachmentClient chat.AttachmentDownloader
 	MemoryService    memory.Service
 	SandboxRunner    sandbox.Runner
 	WorkspaceManager *workspace.Manager
@@ -152,39 +165,107 @@ func (a Activities) PostChatMessageActivity(ctx context.Context, input PostChatM
 	return PostChatMessageActivityOutput{Posted: true}, nil
 }
 
-// FetchAttachmentActivity is a placeholder for attachment download/extraction.
+// FetchAttachmentActivity downloads, stores, and indexes one attachment body.
 func (a Activities) FetchAttachmentActivity(ctx context.Context, input FetchAttachmentActivityInput) (FetchAttachmentActivityOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return FetchAttachmentActivityOutput{}, err
 	}
+	if a.WorkspaceManager == nil {
+		return FetchAttachmentActivityOutput{}, errMissingWorkspaceManager
+	}
+	if a.AttachmentClient == nil {
+		return FetchAttachmentActivityOutput{}, errMissingAttachmentClient
+	}
+	if a.Store == nil {
+		return FetchAttachmentActivityOutput{}, errMissingStore
+	}
+	ws, err := a.WorkspaceManager.Acquire(ctx, input.Artifact.ThreadID)
+	if err != nil {
+		return FetchAttachmentActivityOutput{}, err
+	}
+	body, err := a.AttachmentClient.DownloadAttachment(ctx, input.Attachment)
+	if err != nil {
+		return FetchAttachmentActivityOutput{}, fmt.Errorf("download attachment: %w", err)
+	}
+	sum := sha256.Sum256(body)
+	contentHash := hex.EncodeToString(sum[:])
+	storagePath, err := ws.ArtifactPath(input.Artifact.FileName, contentHash)
+	if err != nil {
+		return FetchAttachmentActivityOutput{}, err
+	}
+	if err := writeFileIfAbsent(ctx, storagePath, body, 0o640); err != nil {
+		return FetchAttachmentActivityOutput{}, err
+	}
+
+	artifact := input.Artifact
+	artifact.ContentHash = contentHash
+	artifact.StoragePath = storagePath
+	artifact.ExtractionStatus = store.ArtifactExtractionSkipped
+	metadata := artifactMetadata(artifact.Metadata)
+	metadata["content_size_bytes"] = strconv.Itoa(len(body))
+
+	if isTextLikeArtifact(artifact.FileName, artifact.MimeType) && utf8.Valid(body) {
+		textPath, err := ws.ExtractedTextPath(contentHash)
+		if err != nil {
+			return FetchAttachmentActivityOutput{}, err
+		}
+		text := body
+		if len(text) > 1<<20 {
+			text = text[:1<<20]
+			metadata["extraction_truncated"] = "true"
+		}
+		if err := writeFileIfAbsent(ctx, textPath, text, 0o640); err != nil {
+			return FetchAttachmentActivityOutput{}, err
+		}
+		artifact.ExtractionStatus = store.ArtifactExtractionReady
+		metadata["extraction_path"] = textPath
+	} else {
+		metadata["extraction_reason"] = "unsupported_or_binary_type"
+	}
+	artifact.Metadata = jsonRawObject(metadata)
+	if err := a.Store.UpdateChatArtifact(ctx, artifact); err != nil {
+		return FetchAttachmentActivityOutput{}, err
+	}
 	return FetchAttachmentActivityOutput{
-		Artifact: input.Artifact,
-		Skipped:  true,
-		Reason:   "attachment fetching is not implemented",
+		Artifact:    artifact,
+		ContentHash: contentHash,
+		StoragePath: storagePath,
 	}, nil
 }
 
-// SyncRepoCacheActivity is a placeholder for repository cache synchronization.
+// SyncRepoCacheActivity clones or fetches a bare repository cache.
 func (a Activities) SyncRepoCacheActivity(ctx context.Context, input SyncRepoCacheActivityInput) (SyncRepoCacheActivityOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return SyncRepoCacheActivityOutput{}, err
 	}
-	output := SyncRepoCacheActivityOutput{
-		Skipped: true,
-		Reason:  "repo cache sync is not implemented",
+	if a.WorkspaceManager == nil {
+		return SyncRepoCacheActivityOutput{}, errMissingWorkspaceManager
 	}
-	if a.WorkspaceManager != nil && input.ThreadID != "" && input.Repo != "" {
-		ws, err := a.WorkspaceManager.Acquire(ctx, input.ThreadID)
-		if err != nil {
+	ws, err := a.WorkspaceManager.Acquire(ctx, input.ThreadID)
+	if err != nil {
+		return SyncRepoCacheActivityOutput{}, err
+	}
+	repoCachePath, err := ws.RepoCachePath(input.Repo)
+	if err != nil {
+		return SyncRepoCacheActivityOutput{}, err
+	}
+	if _, err := os.Stat(filepath.Join(repoCachePath, "HEAD")); errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(filepath.Dir(repoCachePath), 0o750); err != nil {
+			return SyncRepoCacheActivityOutput{}, fmt.Errorf("create repo cache root: %w", err)
+		}
+		if err := runGit(ctx, "clone", "--mirror", input.Repo, repoCachePath); err != nil {
 			return SyncRepoCacheActivityOutput{}, err
 		}
-		repoCachePath, err := ws.RepoCachePath(input.Repo)
-		if err != nil {
+	} else if err != nil {
+		return SyncRepoCacheActivityOutput{}, fmt.Errorf("inspect repo cache: %w", err)
+	} else if strings.TrimSpace(input.Ref) != "" {
+		if err := runGit(ctx, "-C", repoCachePath, "fetch", "--prune", "origin", input.Ref); err != nil {
 			return SyncRepoCacheActivityOutput{}, err
 		}
-		output.RepoCachePath = repoCachePath
+	} else if err := runGit(ctx, "-C", repoCachePath, "remote", "update", "--prune"); err != nil {
+		return SyncRepoCacheActivityOutput{}, err
 	}
-	return output, nil
+	return SyncRepoCacheActivityOutput{RepoCachePath: repoCachePath}, nil
 }
 
 // AcquireWorkspaceActivity ensures a workspace exists for a thread.
@@ -244,4 +325,88 @@ func (a Activities) RecordUsageActivity(ctx context.Context, input RecordUsageAc
 		return RecordUsageActivityOutput{}, err
 	}
 	return RecordUsageActivityOutput{Recorded: true}, nil
+}
+
+func writeFileIfAbsent(ctx context.Context, path string, body []byte, perm os.FileMode) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return fmt.Errorf("create artifact directory: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create artifact file: %w", err)
+	}
+	defer file.Close()
+	if _, err := file.Write(body); err != nil {
+		return fmt.Errorf("write artifact file: %w", err)
+	}
+	return nil
+}
+
+func runGit(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, truncateForError(output))
+	}
+	return nil
+}
+
+func truncateForError(output []byte) string {
+	text := strings.TrimSpace(string(output))
+	if len(text) > 8192 {
+		return text[:8192]
+	}
+	return text
+}
+
+func isTextLikeArtifact(fileName string, mimeType string) bool {
+	mediaType, _, _ := mime.ParseMediaType(mimeType)
+	if strings.HasPrefix(mediaType, "text/") {
+		return true
+	}
+	switch mediaType {
+	case "application/json", "application/xml", "application/x-yaml", "application/yaml":
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(fileName)) {
+	case ".txt", ".log", ".md", ".json", ".yaml", ".yml", ".csv", ".tsv", ".xml",
+		".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".rb", ".rs", ".sh",
+		".toml", ".ini", ".env":
+		return true
+	default:
+		return false
+	}
+}
+
+func artifactMetadata(raw json.RawMessage) map[string]string {
+	metadata := map[string]string{}
+	if len(raw) == 0 {
+		return metadata
+	}
+	var stringMap map[string]string
+	if err := json.Unmarshal(raw, &stringMap); err == nil {
+		return stringMap
+	}
+	var anyMap map[string]any
+	if err := json.Unmarshal(raw, &anyMap); err != nil {
+		return metadata
+	}
+	for key, value := range anyMap {
+		metadata[key] = fmt.Sprint(value)
+	}
+	return metadata
+}
+
+func jsonRawObject(metadata map[string]string) json.RawMessage {
+	body, err := json.Marshal(metadata)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(body)
 }

@@ -107,17 +107,28 @@ func (w *Workspace) RepoCachePath(repo string) (string, error) {
 	return filepath.Join(w.RepoCacheRoot, safePathID(repo)+".git"), nil
 }
 
-// ArtifactPath returns a deterministic artifact path for a file name and content hash.
+// ArtifactPath returns the content-addressed raw artifact path.
 func (w *Workspace) ArtifactPath(fileName string, contentHash string) (string, error) {
 	contentHash = strings.TrimSpace(contentHash)
 	if contentHash == "" {
 		return "", fmt.Errorf("content hash is empty")
 	}
-	name := safePathID(fileName)
-	if name == "" {
-		name = "artifact"
+	if len(contentHash) < 2 {
+		return "", fmt.Errorf("content hash is too short")
 	}
-	return filepath.Join(w.ArtifactsDir, contentHash+"-"+name), nil
+	return filepath.Join(w.ArtifactsDir, contentHash[:2], contentHash), nil
+}
+
+// ExtractedTextPath returns the extracted text path for a stored artifact.
+func (w *Workspace) ExtractedTextPath(contentHash string) (string, error) {
+	contentHash = strings.TrimSpace(contentHash)
+	if contentHash == "" {
+		return "", fmt.Errorf("content hash is empty")
+	}
+	if len(contentHash) < 2 {
+		return "", fmt.Errorf("content hash is too short")
+	}
+	return filepath.Join(w.ArtifactsDir, contentHash[:2], contentHash+".txt"), nil
 }
 
 func safePathID(value string) string {
