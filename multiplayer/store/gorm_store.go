@@ -316,7 +316,12 @@ func (s *GORMStore) CreateWorkerRun(ctx context.Context, run WorkerRun) error {
 		model.CreatedAt = time.Now().UTC()
 	}
 	model.UpdatedAt = time.Now().UTC()
-	if err := s.db.WithContext(ctx).Create(&model).Error; err != nil {
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"status", "model", "sandbox_image", "started_at", "updated_at",
+		}),
+	}).Create(&model).Error; err != nil {
 		return fmt.Errorf("create worker run: %w", err)
 	}
 	return nil

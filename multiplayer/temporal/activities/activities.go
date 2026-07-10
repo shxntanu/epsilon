@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/shxntanu/epsilon/multiplayer/chat"
@@ -104,7 +105,10 @@ type AcquireWorkspaceActivityOutput struct {
 
 // RunSandboxWorkerActivityInput is the input for RunSandboxWorkerActivity.
 type RunSandboxWorkerActivityInput struct {
-	Spec sandbox.TaskSpec
+	Spec         sandbox.TaskSpec
+	WorkerRunID  string
+	WorkerRole   string
+	SandboxImage string
 }
 
 // RunSandboxWorkerActivityOutput is the output for RunSandboxWorkerActivity.
@@ -285,7 +289,38 @@ func (a Activities) RunSandboxWorkerActivity(ctx context.Context, input RunSandb
 	if a.SandboxRunner == nil {
 		return RunSandboxWorkerActivityOutput{}, errMissingSandboxRunner
 	}
-	result, err := a.SandboxRunner.Run(ctx, input.Spec)
+	spec, runID, err := a.prepareSandboxSpec(ctx, input)
+	if err != nil {
+		return RunSandboxWorkerActivityOutput{}, err
+	}
+	if a.Store != nil {
+		now := time.Now().UTC()
+		if err := a.Store.CreateWorkerRun(ctx, store.WorkerRun{
+			ID:           runID,
+			TaskID:       spec.TaskID,
+			ThreadID:     spec.ThreadID,
+			WorkerRole:   firstNonEmpty(input.WorkerRole, spec.WorkerRole),
+			Model:        spec.Model,
+			Status:       store.WorkerRunStatusRunning,
+			SandboxImage: firstNonEmpty(input.SandboxImage, "srt"),
+			StartedAt:    now,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}); err != nil {
+			return RunSandboxWorkerActivityOutput{}, err
+		}
+	}
+	result, err := a.SandboxRunner.Run(ctx, spec)
+	if a.Store != nil {
+		status := workerRunStatus(result.Status, err)
+		errMessage := result.Error
+		if err != nil && errMessage == "" {
+			errMessage = err.Error()
+		}
+		if updateErr := a.Store.UpdateWorkerRunStatus(ctx, runID, status, result.ResultPointer, errMessage); updateErr != nil && err == nil {
+			return RunSandboxWorkerActivityOutput{}, updateErr
+		}
+	}
 	if err != nil {
 		return RunSandboxWorkerActivityOutput{}, err
 	}
@@ -325,6 +360,92 @@ func (a Activities) RecordUsageActivity(ctx context.Context, input RecordUsageAc
 		return RecordUsageActivityOutput{}, err
 	}
 	return RecordUsageActivityOutput{Recorded: true}, nil
+}
+
+func (a Activities) prepareSandboxSpec(ctx context.Context, input RunSandboxWorkerActivityInput) (sandbox.TaskSpec, string, error) {
+	spec := input.Spec
+	if spec.RunID == "" {
+		spec.RunID = strings.TrimSpace(input.WorkerRunID)
+	}
+	if spec.RunID == "" {
+		spec.RunID = stableActivityID("worker_run", spec.ThreadID, spec.TaskID, spec.WorkerRole, spec.Model)
+	}
+	if spec.WorkerRole == "" {
+		spec.WorkerRole = input.WorkerRole
+	}
+	if strings.TrimSpace(spec.ResultPath) == "" {
+		if a.WorkspaceManager == nil {
+			return sandbox.TaskSpec{}, "", errMissingWorkspaceManager
+		}
+		ws, err := a.WorkspaceManager.Acquire(ctx, spec.ThreadID)
+		if err != nil {
+			return sandbox.TaskSpec{}, "", err
+		}
+		scratch, err := ws.TaskScratch(ctx, spec.TaskID)
+		if err != nil {
+			return sandbox.TaskSpec{}, "", err
+		}
+		spec.ResultPath = filepath.Join(scratch.Path, "result.json")
+		spec.WorkingDir = firstNonEmpty(spec.WorkingDir, scratch.Path)
+		spec.Mounts = ensureWritableMount(spec.Mounts, scratch.Path)
+	}
+	return spec, spec.RunID, nil
+}
+
+func ensureWritableMount(mounts []sandbox.Mount, path string) []sandbox.Mount {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return mounts
+	}
+	for i, mount := range mounts {
+		if filepath.Clean(mount.Source) != filepath.Clean(path) {
+			continue
+		}
+		mounts[i].ReadOnly = false
+		return mounts
+	}
+	return append(mounts, sandbox.Mount{
+		Source:   path,
+		Target:   path,
+		ReadOnly: false,
+	})
+}
+
+func workerRunStatus(status sandbox.Status, err error) store.WorkerRunStatus {
+	if err != nil && status == sandbox.StatusCancelled {
+		return store.WorkerRunStatusCancelled
+	}
+	if err != nil {
+		return store.WorkerRunStatusFailed
+	}
+	switch status {
+	case sandbox.StatusSucceeded:
+		return store.WorkerRunStatusSucceeded
+	case sandbox.StatusCancelled:
+		return store.WorkerRunStatusCancelled
+	case sandbox.StatusFailed:
+		return store.WorkerRunStatusFailed
+	default:
+		return store.WorkerRunStatusFailed
+	}
+}
+
+func stableActivityID(parts ...string) string {
+	hash := sha256.New()
+	for _, part := range parts {
+		_, _ = hash.Write([]byte(part))
+		_, _ = hash.Write([]byte{0})
+	}
+	return "wr_" + hex.EncodeToString(hash.Sum(nil))[:24]
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func writeFileIfAbsent(ctx context.Context, path string, body []byte, perm os.FileMode) error {

@@ -33,10 +33,14 @@ const (
 // TaskSpec describes one isolated worker execution request.
 type TaskSpec struct {
 	TaskID       string
+	RunID        string
 	ThreadID     string
 	Instruction  string
 	Command      []string
 	Model        string
+	WorkerRole   string
+	ResultPath   string
+	WorkingDir   string
 	Timeout      time.Duration
 	Mounts       []Mount
 	EnvAllowlist []string
@@ -70,14 +74,14 @@ type Usage struct {
 
 // WorkerResultFile is the JSON-friendly result shape workers should emit.
 type WorkerResultFile struct {
-	Status        Status
-	Summary       string
-	EvidenceRefs  []string
-	Confidence    float64
-	OpenQuestions []string
-	Usage         Usage
-	ExitCode      *int
-	Error         string
+	Status        Status   `json:"status"`
+	Summary       string   `json:"summary"`
+	EvidenceRefs  []string `json:"evidence_refs,omitempty"`
+	Confidence    float64  `json:"confidence,omitempty"`
+	OpenQuestions []string `json:"open_questions,omitempty"`
+	Usage         Usage    `json:"usage,omitempty"`
+	ExitCode      *int     `json:"exit_code,omitempty"`
+	Error         string   `json:"error,omitempty"`
 }
 
 // Result is the runner-returned result shape for a sandbox execution.
@@ -90,6 +94,7 @@ type Result struct {
 	Usage         Usage
 	ExitCode      *int
 	Error         string
+	ResultPointer string
 }
 
 // Runner executes a task inside a sandbox.

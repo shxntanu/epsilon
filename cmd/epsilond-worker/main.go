@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/shxntanu/epsilon/multiplayer/chat/googlechat"
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
+	"github.com/shxntanu/epsilon/multiplayer/sandbox"
 	"github.com/shxntanu/epsilon/multiplayer/store"
 	"github.com/shxntanu/epsilon/multiplayer/temporal/activities"
 	"github.com/shxntanu/epsilon/multiplayer/temporal/workflows"
@@ -61,6 +63,10 @@ func run() error {
 			TokenProvider: googlechat.StaticTokenProvider{Token: cfg.GoogleChatAccessToken},
 		}
 	}
+	sandboxRunner, err := buildSandboxRunner(cfg)
+	if err != nil {
+		return err
+	}
 	temporalClient, err := client.Dial(client.Options{
 		HostPort:  cfg.TemporalAddress,
 		Namespace: cfg.TemporalNamespace,
@@ -74,6 +80,7 @@ func run() error {
 	w.RegisterWorkflowWithOptions(workflows.ThreadWorkflow, workflowRegisterOptions(workflows.ThreadWorkflowName))
 	activitySet := &activities.Activities{
 		Store:            pgStore,
+		SandboxRunner:    sandboxRunner,
 		WorkspaceManager: workspaceManager,
 	}
 	if googleClient != nil {
@@ -94,6 +101,20 @@ func run() error {
 	logger.Info("epsilond-worker stopping")
 	w.Stop()
 	return nil
+}
+
+func buildSandboxRunner(cfg epsilond.Config) (sandbox.Runner, error) {
+	switch cfg.SandboxBackend {
+	case "", "srt":
+		return sandbox.SRTRunner{
+			Binary:      cfg.SRTBinary,
+			SettingsDir: filepath.Join(cfg.WorkspaceRoot, ".srt-settings"),
+		}, nil
+	case "noop":
+		return sandbox.NoopRunner{}, nil
+	default:
+		return nil, fmt.Errorf("unsupported sandbox backend %q", cfg.SandboxBackend)
+	}
 }
 
 func workflowRegisterOptions(name string) workflow.RegisterOptions {
