@@ -37,6 +37,21 @@ func NewGORMStore(db *gorm.DB) *GORMStore {
 	return &GORMStore{db: db}
 }
 
+// Ready verifies the Postgres connection is reachable.
+func (s *GORMStore) Ready(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("gorm store is not configured")
+	}
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return fmt.Errorf("get sql db: %w", err)
+	}
+	if err := sqlDB.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping postgres: %w", err)
+	}
+	return nil
+}
+
 // AutoMigrate creates or updates the epsilond multiplayer tables.
 func (s *GORMStore) AutoMigrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
@@ -60,6 +75,9 @@ func (s *GORMStore) AutoMigrate(ctx context.Context) error {
 
 // UpsertSpace stores or updates a Google Chat space.
 func (s *GORMStore) UpsertSpace(ctx context.Context, space Space) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
 	model := spaceToModel(space)
 	if model.ID == "" {
 		model.ID = stableStoreID("space", firstNonEmpty(model.GoogleSpaceID, model.GoogleSpaceName))
@@ -81,6 +99,9 @@ func (s *GORMStore) UpsertSpace(ctx context.Context, space Space) error {
 
 // UpsertThread stores or updates a Google Chat thread.
 func (s *GORMStore) UpsertThread(ctx context.Context, thread Thread) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
 	model := threadToModel(thread)
 	if model.ID == "" {
 		model.ID = stableStoreID("thread", model.SpaceID, firstNonEmpty(model.GoogleThreadID, model.GoogleThreadName))
@@ -113,8 +134,45 @@ func (s *GORMStore) UpsertThread(ctx context.Context, thread Thread) error {
 	return nil
 }
 
+// UpdateThreadState updates thread state only when expectedVersion matches.
+func (s *GORMStore) UpdateThreadState(ctx context.Context, thread Thread, expectedVersion int64) (bool, error) {
+	if err := s.requireDB(); err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(thread.ID) == "" {
+		return false, fmt.Errorf("thread ID is empty")
+	}
+	if expectedVersion <= 0 {
+		return false, fmt.Errorf("expected version must be positive")
+	}
+	updates := map[string]any{
+		"status":          string(thread.Status),
+		"summary_pointer": thread.SummaryPointer,
+		"pinned_facts":    jsonOrDefault(thread.PinnedFacts, `[]`),
+		"workspace_tier":  thread.WorkspaceTier,
+		"version":         gorm.Expr("version + 1"),
+		"updated_at":      time.Now().UTC(),
+	}
+	if thread.Status == "" {
+		delete(updates, "status")
+	}
+	if thread.WorkspaceTier == "" {
+		delete(updates, "workspace_tier")
+	}
+	result := s.db.WithContext(ctx).Model(&threadModel{}).
+		Where("id = ? AND version = ?", thread.ID, expectedVersion).
+		Updates(updates)
+	if result.Error != nil {
+		return false, fmt.Errorf("update thread state: %w", result.Error)
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // InsertChatMessage stores a message idempotently.
 func (s *GORMStore) InsertChatMessage(ctx context.Context, message ChatMessage) (bool, error) {
+	if err := s.requireDB(); err != nil {
+		return false, err
+	}
 	model := chatMessageToModel(message)
 	if model.ID == "" {
 		model.ID = stableStoreID("message", model.SpaceID, firstNonEmpty(model.GoogleEventID, model.GoogleMessageID, model.GoogleMessageName))
@@ -135,8 +193,36 @@ func (s *GORMStore) InsertChatMessage(ctx context.Context, message ChatMessage) 
 	return result.RowsAffected > 0, nil
 }
 
+// InsertChatArtifact stores attachment metadata idempotently by ID.
+func (s *GORMStore) InsertChatArtifact(ctx context.Context, artifact ChatArtifact) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
+	model := chatArtifactToModel(artifact)
+	if model.ID == "" {
+		model.ID = stableStoreID("artifact", model.MessageID, model.GoogleAttachment, model.FileName, model.ContentHash)
+	}
+	if model.ExtractionStatus == "" {
+		model.ExtractionStatus = string(ArtifactExtractionPending)
+	}
+	if model.CreatedAt.IsZero() {
+		model.CreatedAt = time.Now().UTC()
+	}
+	model.UpdatedAt = time.Now().UTC()
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "id"}},
+		DoNothing: true,
+	}).Create(&model).Error; err != nil {
+		return fmt.Errorf("insert chat artifact: %w", err)
+	}
+	return nil
+}
+
 // CreateTask stores a task row.
 func (s *GORMStore) CreateTask(ctx context.Context, task Task) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
 	model := taskToModel(task)
 	if model.ID == "" {
 		model.ID = stableStoreID("task", model.ThreadID, model.Goal, time.Now().UTC().Format(time.RFC3339Nano))
@@ -156,6 +242,9 @@ func (s *GORMStore) CreateTask(ctx context.Context, task Task) error {
 
 // UpdateTaskStatus updates the lifecycle status for a task.
 func (s *GORMStore) UpdateTaskStatus(ctx context.Context, taskID string, status TaskStatus) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
 		return fmt.Errorf("task ID is empty")
@@ -170,14 +259,74 @@ func (s *GORMStore) UpdateTaskStatus(ctx context.Context, taskID string, status 
 	case TaskStatusSucceeded, TaskStatusFailed, TaskStatusCancelled:
 		updates["completed_at"] = time.Now().UTC()
 	}
-	if err := s.db.WithContext(ctx).Model(&taskModel{}).Where("id = ?", taskID).Updates(updates).Error; err != nil {
-		return fmt.Errorf("update task status: %w", err)
+	result := s.db.WithContext(ctx).Model(&taskModel{}).Where("id = ?", taskID).Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("update task status: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("task %q not found", taskID)
+	}
+	return nil
+}
+
+// CreateWorkerRun stores one worker execution record.
+func (s *GORMStore) CreateWorkerRun(ctx context.Context, run WorkerRun) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
+	model := workerRunToModel(run)
+	if model.ID == "" {
+		model.ID = stableStoreID("worker", model.TaskID, model.WorkerRole, time.Now().UTC().Format(time.RFC3339Nano))
+	}
+	if model.Status == "" {
+		model.Status = string(WorkerRunStatusPending)
+	}
+	if model.CreatedAt.IsZero() {
+		model.CreatedAt = time.Now().UTC()
+	}
+	model.UpdatedAt = time.Now().UTC()
+	if err := s.db.WithContext(ctx).Create(&model).Error; err != nil {
+		return fmt.Errorf("create worker run: %w", err)
+	}
+	return nil
+}
+
+// UpdateWorkerRunStatus updates worker execution state and result pointers.
+func (s *GORMStore) UpdateWorkerRunStatus(ctx context.Context, runID string, status WorkerRunStatus, resultPointer string, errMessage string) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("worker run ID is empty")
+	}
+	updates := map[string]any{
+		"status":         string(status),
+		"result_pointer": resultPointer,
+		"error_message":  errMessage,
+		"updated_at":     time.Now().UTC(),
+	}
+	switch status {
+	case WorkerRunStatusRunning:
+		updates["started_at"] = time.Now().UTC()
+	case WorkerRunStatusSucceeded, WorkerRunStatusFailed, WorkerRunStatusCancelled:
+		updates["completed_at"] = time.Now().UTC()
+	}
+	result := s.db.WithContext(ctx).Model(&workerRunModel{}).Where("id = ?", runID).Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("update worker run status: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("worker run %q not found", runID)
 	}
 	return nil
 }
 
 // RecordUsage stores a usage ledger entry.
 func (s *GORMStore) RecordUsage(ctx context.Context, entry UsageLedgerEntry) error {
+	if err := s.requireDB(); err != nil {
+		return err
+	}
 	model := usageLedgerToModel(entry)
 	if model.ID == "" {
 		model.ID = stableStoreID("usage", model.ThreadID, model.TaskID, model.Model, time.Now().UTC().Format(time.RFC3339Nano))
@@ -187,6 +336,13 @@ func (s *GORMStore) RecordUsage(ctx context.Context, entry UsageLedgerEntry) err
 	}
 	if err := s.db.WithContext(ctx).Create(&model).Error; err != nil {
 		return fmt.Errorf("record usage: %w", err)
+	}
+	return nil
+}
+
+func (s *GORMStore) requireDB() error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("gorm store is not configured")
 	}
 	return nil
 }
@@ -413,6 +569,46 @@ func taskToModel(task Task) taskModel {
 		UpdatedAt:       task.UpdatedAt,
 		StartedAt:       task.StartedAt,
 		CompletedAt:     task.CompletedAt,
+	}
+}
+
+func chatArtifactToModel(artifact ChatArtifact) chatArtifactModel {
+	return chatArtifactModel{
+		ID:               artifact.ID,
+		MessageID:        artifact.MessageID,
+		SpaceID:          artifact.SpaceID,
+		ThreadID:         artifact.ThreadID,
+		GoogleAttachment: artifact.GoogleAttachment,
+		FileName:         artifact.FileName,
+		MimeType:         artifact.MimeType,
+		ContentHash:      artifact.ContentHash,
+		StoragePath:      artifact.StoragePath,
+		ExtractionStatus: string(artifact.ExtractionStatus),
+		Metadata:         jsonOrDefault(artifact.Metadata, `{}`),
+		CreatedAt:        artifact.CreatedAt,
+		UpdatedAt:        artifact.UpdatedAt,
+	}
+}
+
+func workerRunToModel(run WorkerRun) workerRunModel {
+	return workerRunModel{
+		ID:            run.ID,
+		TaskID:        run.TaskID,
+		ThreadID:      run.ThreadID,
+		WorkerRole:    run.WorkerRole,
+		Model:         run.Model,
+		Status:        string(run.Status),
+		SandboxImage:  run.SandboxImage,
+		ResultPointer: run.ResultPointer,
+		ExitCode:      run.ExitCode,
+		ErrorMessage:  run.ErrorMessage,
+		InputTokens:   run.InputTokens,
+		OutputTokens:  run.OutputTokens,
+		EstimatedCost: run.EstimatedCost,
+		StartedAt:     run.StartedAt,
+		CompletedAt:   run.CompletedAt,
+		CreatedAt:     run.CreatedAt,
+		UpdatedAt:     run.UpdatedAt,
 	}
 }
 

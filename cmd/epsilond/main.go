@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/shxntanu/epsilon/multiplayer/epsilond"
+	"github.com/shxntanu/epsilon/multiplayer/store"
 )
 
 func main() {
@@ -26,11 +28,30 @@ func run() error {
 		return err
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{}))
+	checker := epsilond.ConfigReadiness{Config: cfg}
+	var pgStore store.Store
+	if cfg.PostgresDSN != "" {
+		gormStore, err := store.OpenGORM(cfg.PostgresDSN)
+		if err != nil {
+			return err
+		}
+		if cfg.AutoMigrate {
+			migrateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := gormStore.AutoMigrate(migrateCtx); err != nil {
+				cancel()
+				return err
+			}
+			cancel()
+		}
+		checker.Store = gormStore
+		pgStore = gormStore
+	}
 	service := epsilond.NewServer(cfg,
 		epsilond.WithLogger(logger),
-		epsilond.WithDependencyChecker(epsilond.ConfigReadiness{Config: cfg}),
+		epsilond.WithDependencyChecker(checker),
 		epsilond.WithIngestor(epsilond.BootstrapIngestor{
 			Orchestrator: epsilond.BootstrapOrchestrator{},
+			Store:        pgStore,
 		}),
 	)
 	httpServer := &http.Server{

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/shxntanu/epsilon/multiplayer/chat"
 )
@@ -40,12 +39,11 @@ func (BootstrapOrchestrator) HandleMention(ctx context.Context, event *chat.Even
 	if threadName == "" {
 		threadName = event.MessageName
 	}
-	workflowID := "thread/" + stableID(event.SpaceName) + "/" + stableID(threadName)
+	workflowID := workflowID(event)
 	taskID := "task_" + stableID(strings.Join([]string{
 		event.SpaceName,
 		threadName,
 		event.MessageName,
-		time.Now().UTC().Format(time.RFC3339Nano),
 	}, "\n"))[:16]
 	return TaskHandle{
 		TaskID:     taskID,
@@ -54,8 +52,12 @@ func (BootstrapOrchestrator) HandleMention(ctx context.Context, event *chat.Even
 	}, nil
 }
 
-func stableID(value string) string {
-	value = strings.TrimSpace(value)
+func stableID(parts ...any) string {
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		values = append(values, fmt.Sprint(part))
+	}
+	value := strings.TrimSpace(strings.Join(values, "\x00"))
 	if value == "" {
 		value = "unknown"
 	}

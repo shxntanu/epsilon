@@ -10,6 +10,7 @@ type SpaceStore interface {
 // ThreadStore persists durable per-thread orchestration state.
 type ThreadStore interface {
 	UpsertThread(ctx context.Context, thread Thread) error
+	UpdateThreadState(ctx context.Context, thread Thread, expectedVersion int64) (bool, error)
 }
 
 // MessageStore persists normalized Chat events.
@@ -25,6 +26,17 @@ type TaskStore interface {
 	UpdateTaskStatus(ctx context.Context, taskID string, status TaskStatus) error
 }
 
+// ArtifactStore persists attachment and generated artifact metadata.
+type ArtifactStore interface {
+	InsertChatArtifact(ctx context.Context, artifact ChatArtifact) error
+}
+
+// WorkerRunStore persists sandbox worker execution records.
+type WorkerRunStore interface {
+	CreateWorkerRun(ctx context.Context, run WorkerRun) error
+	UpdateWorkerRunStatus(ctx context.Context, runID string, status WorkerRunStatus, resultPointer string, errMessage string) error
+}
+
 // UsageStore records model/token spend attribution.
 type UsageStore interface {
 	RecordUsage(ctx context.Context, entry UsageLedgerEntry) error
@@ -35,6 +47,18 @@ type Store interface {
 	SpaceStore
 	ThreadStore
 	MessageStore
+	ArtifactStore
 	TaskStore
+	WorkerRunStore
 	UsageStore
+}
+
+// Migrator updates backing storage schema for prototype deployments.
+type Migrator interface {
+	AutoMigrate(ctx context.Context) error
+}
+
+// HealthChecker verifies the backing store can serve requests.
+type HealthChecker interface {
+	Ready(ctx context.Context) error
 }

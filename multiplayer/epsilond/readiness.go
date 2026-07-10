@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/shxntanu/epsilon/multiplayer/store"
 )
 
 // ConfigReadiness checks whether required production configuration is present.
 type ConfigReadiness struct {
 	Config Config
+	Store  store.HealthChecker
 }
 
 // Ready reports missing core epsilond dependencies.
@@ -33,6 +36,11 @@ func (r ConfigReadiness) Ready(ctx context.Context) error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required configuration: %s", strings.Join(missing, ", "))
+	}
+	if r.Store != nil {
+		if err := r.Store.Ready(ctx); err != nil {
+			return err
+		}
 	}
 	return nil
 }

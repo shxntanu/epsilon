@@ -27,6 +27,7 @@ type Config struct {
 	ShutdownTimeout      time.Duration
 	MaxEventBodyBytes    int64
 	PostgresDSN          string
+	AutoMigrate          bool
 	TemporalAddress      string
 	TemporalNamespace    string
 	TemporalTaskQueue    string
@@ -54,6 +55,7 @@ func LoadConfigFromEnv() (Config, error) {
 		ShutdownTimeout:      durationEnvOrDefault("EPSILOND_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
 		MaxEventBodyBytes:    int64EnvOrDefault("EPSILOND_MAX_EVENT_BODY_BYTES", defaultMaxEventBodyBytes),
 		PostgresDSN:          strings.TrimSpace(os.Getenv("EPSILOND_POSTGRES_DSN")),
+		AutoMigrate:          boolEnvOrDefault("EPSILOND_AUTO_MIGRATE", true),
 		TemporalAddress:      strings.TrimSpace(os.Getenv("EPSILOND_TEMPORAL_ADDRESS")),
 		TemporalNamespace:    envOrDefault("EPSILOND_TEMPORAL_NAMESPACE", defaultTemporalNamespace),
 		TemporalTaskQueue:    envOrDefault("EPSILOND_TEMPORAL_TASK_QUEUE", defaultTemporalTaskQueue),
@@ -137,6 +139,18 @@ func durationEnvOrDefault(name string, fallback time.Duration) time.Duration {
 	}
 	value, err := time.ParseDuration(raw)
 	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func boolEnvOrDefault(name string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
 		return fallback
 	}
 	return value
