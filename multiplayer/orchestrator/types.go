@@ -7,24 +7,25 @@ import (
 
 // ThreadKey identifies one durable conversation thread managed by epsilond.
 type ThreadKey struct {
+	Platform         string
 	SpaceID          string
 	ThreadID         string
-	GoogleSpaceName  string
-	GoogleThreadName string
+	SpaceExternalID  string
+	ThreadExternalID string
 }
 
 // NewChatMessageSignal is sent when epsilond receives a new user message for a
 // thread workflow.
 type NewChatMessageSignal struct {
-	Thread          ThreadKey
-	MessageID       string
-	GoogleMessageID string
-	SenderID        string
-	SenderName      string
-	Text            string
-	ArgumentText    string
-	Artifacts       []ArtifactRef
-	ReceivedAt      time.Time
+	Thread            ThreadKey
+	MessageID         string
+	ExternalMessageID string
+	SenderID          string
+	SenderName        string
+	Text              string
+	ArgumentText      string
+	Artifacts         []ArtifactRef
+	ReceivedAt        time.Time
 }
 
 // InterruptSignal asks a running thread workflow to pause, cancel, or redirect

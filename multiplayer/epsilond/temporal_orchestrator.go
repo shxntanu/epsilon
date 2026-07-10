@@ -20,20 +20,15 @@ func (o TemporalOrchestrator) HandleMention(ctx context.Context,
 		return TaskHandle{}, fmt.Errorf("orchestrator client is nil")
 	}
 	signal := orchestrator.NewChatMessageSignal{
-		Thread: orchestrator.ThreadKey{
-			SpaceID:          spaceID(event),
-			ThreadID:         threadID(event),
-			GoogleSpaceName:  event.SpaceName,
-			GoogleThreadName: event.ThreadName,
-		},
-		MessageID:       messageID(event),
-		GoogleMessageID: event.MessageName,
-		SenderID:        event.SenderName,
-		SenderName:      event.SenderDisplayName,
-		Text:            event.Text,
-		ArgumentText:    event.Text,
-		Artifacts:       artifactRefs(event),
-		ReceivedAt:      event.ReceivedAt,
+		Thread:            threadKey(event),
+		MessageID:         messageID(event),
+		ExternalMessageID: event.MessageName,
+		SenderID:          event.SenderName,
+		SenderName:        event.SenderDisplayName,
+		Text:              event.Text,
+		ArgumentText:      event.Text,
+		Artifacts:         artifactRefs(event),
+		ReceivedAt:        event.ReceivedAt,
 	}
 	status, err := o.Client.StartOrSignal(ctx, signal)
 	if err != nil {
@@ -115,20 +110,25 @@ func (o TemporalOrchestrator) HandleStatus(ctx context.Context, event *chat.Even
 
 func newMessageSignal(event *chat.Event) orchestrator.NewChatMessageSignal {
 	return orchestrator.NewChatMessageSignal{
-		Thread: orchestrator.ThreadKey{
-			SpaceID:          spaceID(event),
-			ThreadID:         threadID(event),
-			GoogleSpaceName:  event.SpaceName,
-			GoogleThreadName: event.ThreadName,
-		},
-		MessageID:       messageID(event),
-		GoogleMessageID: event.MessageName,
-		SenderID:        event.SenderName,
-		SenderName:      event.SenderDisplayName,
-		Text:            event.Text,
-		ArgumentText:    event.Text,
-		Artifacts:       artifactRefs(event),
-		ReceivedAt:      event.ReceivedAt,
+		Thread:            threadKey(event),
+		MessageID:         messageID(event),
+		ExternalMessageID: event.MessageName,
+		SenderID:          event.SenderName,
+		SenderName:        event.SenderDisplayName,
+		Text:              event.Text,
+		ArgumentText:      event.Text,
+		Artifacts:         artifactRefs(event),
+		ReceivedAt:        event.ReceivedAt,
+	}
+}
+
+func threadKey(event *chat.Event) orchestrator.ThreadKey {
+	return orchestrator.ThreadKey{
+		Platform:         string(event.Platform),
+		SpaceID:          spaceID(event),
+		ThreadID:         threadID(event),
+		SpaceExternalID:  event.SpaceName,
+		ThreadExternalID: event.ThreadName,
 	}
 }
 
